@@ -11,7 +11,7 @@ import MatterDetail from './screens/MatterDetail';
 import TimeBilling from './screens/TimeBilling';
 import Calendar from './screens/Calendar';
 import Scheduling from './screens/Scheduling';
-import Tasks from './screens/Tasks';
+import Tasks, { TaskDrawer } from './screens/Tasks';
 import Messages from './screens/Messages';
 import Phone from './screens/Phone';
 import Portal from './screens/Portal';
@@ -155,6 +155,7 @@ export default function App() {
         <CallBar />
         <main className="content">{view}</main>
       </div>
+      <TaskDrawer />
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );

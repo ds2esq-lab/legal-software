@@ -12,6 +12,65 @@ import { NewTaskForm, TaskRow } from './Tasks';
 
 type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
 
+export function InvoiceList({ m }: { m: Matter }) {
+  const { s, actions, notify } = useStore();
+  const [open, setOpen] = useState<string | null>(null);
+  const list = s.invoices.filter((i) => i.matterId === m.id);
+  const VIA = { portal: 'client portal', email: 'email', mail: 'mail' } as const;
+  return (
+    <section className="panel">
+      <div className="panel-head"><h2>Invoices <span className="num small muted">{list.length}</span></h2></div>
+      <ul className="list">
+        {list.length === 0 && <li className="muted small">No invoices yet.</li>}
+        {list.map((i) => (
+          <li key={i.id} className="stack" style={{ display: 'flex', gap: 6 }}>
+            <div className="spread" style={{ width: '100%', flexWrap: 'wrap' }}>
+              <span className="row" style={{ gap: 8 }}>
+                <button className="link num" onClick={() => setOpen(open === i.id ? null : i.id)}>{i.number}</button>
+                <span className="small muted num">{fmtDate(i.date)}</span>
+                <strong className="num">{money(i.total)}</strong>
+                <span className={`pill ${i.status === 'paid' ? 'ok' : i.status === 'sent' ? 'info' : 'warn'}`}>
+                  {i.status === 'draft' ? 'Draft · not sent' : i.status === 'sent' ? `Sent by ${VIA[i.sentVia!]} ${fmtDate(i.sentAt!)}` : `Paid ${fmtDate(i.paidAt!)}`}
+                </span>
+              </span>
+              <span className="row" style={{ gap: 4 }}>
+                {i.status === 'draft' && (
+                  <>
+                    <button className="btn sm primary" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} posted to the client portal`); }}>Send to portal</button>
+                    <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'email'); notify(`${i.number} emailed to the client`); }}>Email</button>
+                    <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'mail'); notify(`${i.number} marked as mailed`); }}>Mark mailed</button>
+                    <button className="btn sm ghost danger" onClick={() => { actions.deleteDraftInvoice(i.id); notify('Draft deleted. Its time and fees are unbilled again.'); }}>Delete draft</button>
+                  </>
+                )}
+                {i.status === 'sent' && i.sentVia !== 'portal' && <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} also posted to the portal`); }}>Also post to portal</button>}
+                {i.status === 'sent' && <button className="btn sm" onClick={() => { actions.markInvoicePaid(i.id); notify(`${i.number} marked paid`); }}>Record payment</button>}
+              </span>
+            </div>
+            {open === i.id && (
+              <div className="table-wrap" style={{ width: '100%' }}>
+                <table className="t">
+                  <thead><tr><th>Date</th><th>Description</th><th className="r">Hours</th><th className="r">Rate</th><th className="r">Amount</th></tr></thead>
+                  <tbody>
+                    {i.lines.map((l, k) => (
+                      <tr key={k}>
+                        <td className="num">{l.date ? fmtDate(l.date) : 'Fixed price'}</td>
+                        <td>{l.description}</td>
+                        <td className="r num">{l.hours !== undefined ? formatHours(l.hours * 60, s.billing) : '—'}</td>
+                        <td className="r num">{l.rate ? money(l.rate) : '—'}</td>
+                        <td className="r num">{money(l.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify } = useStore();
   const fees = s.flatFees.filter((f) => f.matterId === m.id && f.status === 'unbilled');
@@ -29,7 +88,7 @@ export function InvoicePreview({ m }: { m: Matter }) {
           </thead>
           <tbody>
             {fees.map((f) => (
-              <tr key={f.id}><td className="muted">Flat fee</td><td>{f.description}</td><td className="r muted">—</td><td className="r muted">—</td><td className="r num">{money(f.amount)}</td></tr>
+              <tr key={f.id}><td className="muted">Fixed price</td><td>{f.description}</td><td className="r muted">—</td><td className="r muted">—</td><td className="r num">{money(f.amount)}</td></tr>
             ))}
             {hourlyApplies &&
               entries.map((t) => (
@@ -46,13 +105,18 @@ export function InvoicePreview({ m }: { m: Matter }) {
         </table>
       </div>
       {!hourlyApplies && entries.length > 0 && (
-        <p className="small muted">{entries.length} time {entries.length === 1 ? 'entry is' : 'entries are'} tracked on this flat-fee matter for profitability only. They won’t appear on the invoice.</p>
+        <p className="small muted">{entries.length} time {entries.length === 1 ? 'entry is' : 'entries are'} tracked on this fixed-price matter for profitability only. They won’t appear on the invoice.</p>
       )}
       <div className="spread" style={{ flexWrap: 'wrap' }}>
         <span><span className="label">Invoice total</span> <span className="num" style={{ fontSize: 20, marginLeft: 8 }}>{money(total)}</span></span>
-        <button className="btn primary" disabled={total === 0} onClick={() => { actions.invoiceMatter(m.id); notify(`Invoice for ${money(total)} created and posted to the client portal`); }}>
-          Create invoice & send to portal
-        </button>
+        <span className="row" style={{ gap: 6 }}>
+          <button className="btn primary" disabled={total === 0} onClick={() => { actions.createInvoice(m.id); notify(`Draft invoice for ${money(total)} created. Nothing has been sent.`); }}>
+            Create invoice
+          </button>
+          <button className="btn" disabled={total === 0} onClick={() => { actions.createInvoice(m.id, 'portal'); notify(`Invoice for ${money(total)} created and posted to the client portal`); }}>
+            Create & send to portal
+          </button>
+        </span>
       </div>
     </div>
   );
@@ -249,7 +313,7 @@ function TimeTab({ m }: { m: Matter }) {
 }
 
 export default function MatterDetail() {
-  const { s, matterId, lookup, go, actions, notify } = useStore();
+  const { s, matterId, lookup, go, actions, notify, openTask } = useStore();
   const [tab, setTab] = useState<Tab>('timeline');
   const m = lookup.matter(matterId);
   if (!m) return <p>Matter not found.</p>;
@@ -257,7 +321,7 @@ export default function MatterDetail() {
   const client = lookup.clientOf(m);
   const stageIdx = area.stages.findIndex((x) => x.id === m.stageId);
   const closing = stageIdx >= area.stages.length - 2;
-  const upcoming = [...nextActions(m, area), ...s.tasks.filter((t) => t.matterId === m.id && !t.done).map((t) => ({ date: t.due.slice(0, 10), what: t.title, kind: 'task' as const }))].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 4);
+  const upcoming = [...nextActions(m, area), ...s.tasks.filter((t) => t.matterId === m.id && !t.done).map((t) => ({ date: t.due.slice(0, 10), what: t.title, kind: 'task' as const, taskId: t.id }))].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 4);
   const docs = documents[m.id] ?? [];
   const up = (patch: Partial<Matter>) => actions.updateMatter(m.id, patch);
   const openTasks = s.tasks.filter((t) => t.matterId === m.id && !t.done).sort((a, b) => a.due.localeCompare(b.due));
@@ -339,7 +403,7 @@ export default function MatterDetail() {
               {upcoming.length === 0 && <li className="muted">Nothing dated. Set a suspense date so this doesn’t go quiet.</li>}
               {upcoming.map((a, i) => (
                 <li key={i} className="spread">
-                  <span>{a.what}<div className="small muted">{a.kind === 'suspense' ? 'Suspense' : a.kind === 'milestone' ? 'Milestone' : a.kind === 'task' ? 'Task' : `Contact timer (${area.cadence.soon} days)`}</div></span>
+                  <span>{'taskId' in a ? <button className="link" onClick={() => openTask(a.taskId)}>{a.what}</button> : a.what}<div className="small muted">{a.kind === 'suspense' ? 'Suspense' : a.kind === 'milestone' ? 'Milestone' : a.kind === 'task' ? 'Task' : `Contact timer (${area.cadence.soon} days)`}</div></span>
                   <DuePill iso={a.date} />
                 </li>
               ))}
@@ -393,9 +457,12 @@ export default function MatterDetail() {
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (
         <section className="panel">
-          <div className="panel-head"><h2>Draft invoice</h2><span className="small muted">{billingLabel(m.billing)}</span></div>
+          <div className="panel-head"><h2>Unbilled work</h2><span className="small muted">{billingLabel(m.billing)}</span></div>
           <div className="panel-body"><InvoicePreview m={m} /></div>
         </section>
+      )}
+      {tab === 'billing' && (
+        <InvoiceList m={m} />
       )}
       {tab === 'messages' && <section className="panel"><Thread channel={m.id} allowClient clientName={client?.name} /></section>}
       {tab === 'documents' && (

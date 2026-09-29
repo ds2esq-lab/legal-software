@@ -117,6 +117,30 @@ export interface TimeEntry {
   source?: 'timer' | 'call' | 'manual' | 'meeting';
 }
 
+export interface InvoiceLine {
+  date?: string;
+  description: string;
+  hours?: number;
+  rate?: number;
+  amount: number;
+}
+
+/** Draft → sent (portal, email or mail) → paid. Drafts can be deleted, which releases their time and fees. */
+export interface Invoice {
+  id: string;
+  number: string;
+  matterId: string;
+  date: string;
+  lines: InvoiceLine[];
+  total: number;
+  status: 'draft' | 'sent' | 'paid';
+  sentVia?: 'portal' | 'email' | 'mail';
+  sentAt?: string;
+  paidAt?: string;
+  timeEntryIds: string[];
+  flatFeeIds: string[];
+}
+
 export interface FlatFee {
   id: string;
   matterId: string;
@@ -130,6 +154,15 @@ export interface FlatFee {
  * brought in. Court and statute deadlines are tasks whose due date can never be snoozed or moved.
  */
 export type TaskKind = 'internal' | 'client' | 'court' | 'statute';
+export type TaskStatus = 'todo' | 'doing' | 'waiting-client' | 'waiting-third' | 'stuck' | 'done';
+export const TASK_STATUSES: { id: TaskStatus; label: string; tone: '' | 'info' | 'warn' | 'danger' | 'ok' | 'accent' }[] = [
+  { id: 'todo', label: 'Not started', tone: '' },
+  { id: 'doing', label: 'Working on it', tone: 'info' },
+  { id: 'waiting-client', label: 'Waiting on client', tone: 'warn' },
+  { id: 'waiting-third', label: 'Waiting on 3rd party', tone: 'warn' },
+  { id: 'stuck', label: 'Stuck', tone: 'danger' },
+  { id: 'done', label: 'Done', tone: 'ok' },
+];
 export interface ChecklistItem {
   text: string;
   done: boolean;
@@ -143,13 +176,15 @@ export interface Task {
   assignee: string;
   escalateTo?: string;
   kind: TaskKind;
-  done: boolean;
+  status: TaskStatus;
+  done: boolean; // same as status === 'done'
   doneAt?: string;
   snoozes: number;
   log: string[];
   checklist: ChecklistItem[];
   source: 'manual' | 'stage';
   createdAt: string;
+  comments?: Note[];
 }
 /** Kept for older code paths. */
 export type Reminder = Task;
@@ -557,9 +592,15 @@ export const timeEntries: TimeEntry[] = [
   { id: 't3', matterId: 'm14', date: day(-1), actualMinutes: 128, description: 'Draft petition and proposed order; prepare hearing notice', user: 'me', billable: true, invoiced: false, source: 'timer' },
   { id: 't4', matterId: 'm14', date: day(-3), actualMinutes: 54, description: 'Research: least restrictive alternatives', user: 'marcus', billable: true, invoiced: false, source: 'manual' },
   { id: 't5', matterId: 'm9', date: day(-5), actualMinutes: 4, description: 'Email to clerk re: inventory acceptance', user: 'me', billable: true, invoiced: false, source: 'manual' },
-  { id: 't6', matterId: 'm20', date: day(-1), actualMinutes: 38, description: 'Buy-sell provisions (outside flat-fee scope)', user: 'marcus', billable: true, invoiced: false, source: 'manual' },
+  { id: 't6', matterId: 'm20', date: day(-1), actualMinutes: 38, description: 'Buy-sell provisions (outside fixed-price scope)', user: 'marcus', billable: true, invoiced: false, source: 'manual' },
   { id: 't7', matterId: 'm1', date: day(-4), actualMinutes: 62, description: 'Draft revocable trust and pour-over wills', user: 'me', billable: false, invoiced: false, source: 'timer' },
   { id: 't8', matterId: 'm17', date: day(-2), actualMinutes: 22, description: 'Title search review', user: 'dana', billable: false, invoiced: false, source: 'manual' },
+];
+
+export const invoices: Invoice[] = [
+  { id: 'inv1', number: 'INV-1042', matterId: 'm1', date: day(-12), lines: [{ description: 'Couples Signature (Trust) Plan', amount: 3950 }], total: 3950, status: 'sent', sentVia: 'portal', sentAt: day(-12), timeEntryIds: [], flatFeeIds: ['f1'] },
+  { id: 'inv2', number: 'INV-1038', matterId: 'm12', date: day(-45), lines: [{ description: 'Informal probate administration', amount: 3500 }], total: 3500, status: 'paid', sentVia: 'email', sentAt: day(-45), paidAt: day(-40), timeEntryIds: [], flatFeeIds: ['f4'] },
+  { id: 'inv3', number: 'INV-1040', matterId: 'm20', date: day(-15), lines: [{ description: 'LLC formation package', amount: 950 }], total: 950, status: 'paid', sentVia: 'portal', sentAt: day(-15), paidAt: day(-14), timeEntryIds: [], flatFeeIds: ['f3'] },
 ];
 
 export const flatFees: FlatFee[] = [
@@ -570,24 +611,24 @@ export const flatFees: FlatFee[] = [
   { id: 'f5', matterId: 'm2', description: 'Solo Signature (Trust) Plan', amount: 2950, status: 'unbilled' },
 ];
 
-const tk = (t: Omit<Task, 'snoozes' | 'log' | 'checklist' | 'source' | 'createdAt' | 'done'> & Partial<Task>): Task => ({
-  done: false, snoozes: 0, log: [], checklist: [], source: 'manual', createdAt: at(-3), ...t,
+const tk = (t: Omit<Task, 'snoozes' | 'log' | 'checklist' | 'source' | 'createdAt' | 'done' | 'status'> & Partial<Task>): Task => ({
+  done: false, snoozes: 0, log: [], checklist: [], source: 'manual', createdAt: at(-3), ...t, status: t.status ?? (t.done ? 'done' : 'todo'),
 });
 const cl = (...items: [string, boolean][]) => items.map(([text, done]) => ({ text, done }));
 
 export const tasks: Task[] = [
-  tk({ id: 'r1', title: 'File petition response', matterId: 'm14', due: at(0, 17), assignee: 'me', escalateTo: 'marcus', kind: 'court', snoozes: 1, log: ['Nudged 7 days out', 'Nudged 3 days out', 'Snoozed 2h yesterday'] }),
+  tk({ id: 'r1', title: 'File petition response', matterId: 'm14', due: at(0, 17), assignee: 'me', escalateTo: 'marcus', kind: 'court', status: 'doing', snoozes: 1, log: ['Nudged 7 days out', 'Nudged 3 days out', 'Snoozed 2h yesterday'] }),
   tk({ id: 'r2', title: 'Creditor claim period ends', matterId: 'm8', due: at(38, 17), assignee: 'priya', escalateTo: 'me', kind: 'court' }),
   tk({ id: 'r3', title: 'Mail recorded deed to client', matterId: 'm19', due: at(2, 12), assignee: 'dana', kind: 'client', source: 'stage' }),
-  tk({ id: 'r4', title: 'Chase signed beneficiary forms', matterId: 'm6', due: at(-1, 10), assignee: 'dana', escalateTo: 'me', kind: 'client', snoozes: 3, log: ['Nudged', 'Snoozed 1d', 'Snoozed 1d', 'Snoozed 1d', 'Escalated to You'] }),
-  tk({ id: 'r5', title: 'Prepare signing binder', matterId: 'm4', due: at(0, 12), assignee: 'dana', escalateTo: 'me', kind: 'internal', source: 'stage',
+  tk({ id: 'r4', title: 'Chase signed beneficiary forms', matterId: 'm6', due: at(-1, 10), assignee: 'dana', escalateTo: 'me', kind: 'client', status: 'waiting-client', snoozes: 3, log: ['Nudged', 'Snoozed 1d', 'Snoozed 1d', 'Snoozed 1d', 'Escalated to You'] }),
+  tk({ id: 'r5', title: 'Prepare signing binder', matterId: 'm4', due: at(0, 12), assignee: 'dana', escalateTo: 'me', kind: 'internal', status: 'doing', source: 'stage',
     checklist: cl(['Originals printed', true], ['Witnesses and notary booked', true], ['Funding instructions letter', false], ['Binder assembled', false]) }),
-  tk({ id: 'r6', title: 'Draft documents', matterId: 'm2', due: at(2, 17), assignee: 'marcus', escalateTo: 'me', kind: 'internal', source: 'stage' }),
+  tk({ id: 'r6', title: 'Draft documents', matterId: 'm2', due: at(2, 17), assignee: 'marcus', escalateTo: 'me', kind: 'internal', status: 'doing', source: 'stage' }),
   tk({ id: 'r7', title: 'Attorney review of drafts', matterId: 'm5', due: at(-1, 17), assignee: 'me', escalateTo: 'marcus', kind: 'internal', source: 'stage' }),
   tk({ id: 'r8', title: 'Open estate bank account (EIN first)', matterId: 'm8', due: at(-12, 17), assignee: 'priya', kind: 'internal', source: 'stage', done: true, doneAt: at(-14, 15), log: ['Marked done'] }),
   tk({ id: 'r9', title: 'Serve notice of hearing', matterId: 'm14', due: at(3, 17), assignee: 'dana', escalateTo: 'me', kind: 'court', source: 'stage' }),
   tk({ id: 'r10', title: 'Statute of limitations: breach claim', matterId: 'm10', due: at(118, 9), assignee: 'me', kind: 'statute' }),
-  tk({ id: 'r11', title: 'Call Nadia Greer re: funding the trust', matterId: 'm1', due: at(5, 10), assignee: 'me', kind: 'client' }),
+  tk({ id: 'r11', title: 'Call Nadia Greer re: funding the trust', matterId: 'm1', due: at(5, 10), assignee: 'me', kind: 'client', status: 'stuck', comments: [{ id: 'tc1', at: at(-1, 15), author: 'me', text: 'Advisor won’t discuss accounts until the client signs an authorization. Sent it; no reply yet.' }] }),
   tk({ id: 'r12', title: 'Send engagement letter', pncId: 'p6', due: at(1, 12), assignee: 'dana', kind: 'client' }),
 ];
 /** Kept for older code paths. */

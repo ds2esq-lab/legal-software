@@ -16,7 +16,7 @@ interface Item {
 }
 
 export default function Today() {
-  const { s, actions, lookup, go, notify } = useStore();
+  const { s, actions, lookup, go, notify, openTask } = useStore();
   const [who, setWho] = useState('me');
   const today = todayISO();
   const soonWindow = addDays(today, 2);
@@ -87,7 +87,7 @@ export default function Today() {
               <li key={i.key} className="queue-row">
                 <DuePill iso={i.date} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div><strong style={{ fontWeight: 500 }}>{i.what}</strong> <span className="pill">{i.kind}</span></div>
+                  <div>{i.taskId ? <button className="link" style={{ fontWeight: 500 }} onClick={() => openTask(i.taskId!)}>{i.what}</button> : <strong style={{ fontWeight: 500 }}>{i.what}</strong>} <span className="pill">{i.kind}</span></div>
                   <div className="small muted row" style={{ gap: 6 }}>
                     <button className="link" onClick={() => go('matter', i.m.id)}>{i.m.name}</button>
                     <span>·</span>

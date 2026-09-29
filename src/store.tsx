@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
+import type { Invoice, InvoiceLine } from './data';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
-import { DEFAULT_BILLING, type BillingSettings } from './billing';
+import { billedMinutes, DEFAULT_BILLING, type BillingSettings } from './billing';
 import { addDays, addWorkdays, DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
 export type Screen =
@@ -44,6 +45,7 @@ interface State {
   roles: Role[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
+  invoices: Invoice[];
   tasks: Task[];
   events: CalEvent[];
   messages: Message[];
@@ -77,6 +79,7 @@ function initialState(): State {
     roles: cfg.roles ?? seed.DEFAULT_ROLES,
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
+    invoices: seed.invoices,
     tasks: seed.tasks,
     events: seed.events,
     messages: seed.messages,
@@ -106,6 +109,7 @@ function stageTasksFor(m: Matter, area: PracticeArea, stageId: string, existing:
         assignee,
         escalateTo: assignee === 'me' ? undefined : 'me',
         kind: t.kind,
+        status: 'todo' as const,
         done: false,
         snoozes: 0,
         log: [`Created automatically when the matter moved to ${area.stages.find((x) => x.id === stageId)?.name}`],
@@ -122,6 +126,7 @@ function useStoreValue() {
   const [matterId, setMatterId] = useState<string>('m1');
   const [pncId, setPncId] = useState<string>('p1');
   const [contactId, setContactId] = useState<string>('c1');
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -362,12 +367,72 @@ function useStoreValue() {
       toggleBillable(id: string) {
         setS((x) => ({ ...x, timeEntries: x.timeEntries.map((t) => (t.id === id ? { ...t, billable: !t.billable } : t)) }));
       },
-      invoiceMatter(matterId: string) {
-        setS((x) => ({
-          ...x,
-          timeEntries: x.timeEntries.map((t) => (t.matterId === matterId && t.billable ? { ...t, invoiced: true } : t)),
-          flatFees: x.flatFees.map((f) => (f.matterId === matterId && f.status === 'unbilled' ? { ...f, status: 'invoiced' } : f)),
-        }));
+      /** Create an invoice from everything unbilled on the matter. It starts as a draft; sending is a separate step. */
+      createInvoice(matterId: string, sendVia?: Invoice['sentVia']): string {
+        const id = newId('inv');
+        setS((x) => {
+          const m = x.matters.find((q) => q.id === matterId);
+          if (!m) return x;
+          const rate = m.billing.kind === 'flat' ? 0 : m.billing.rate;
+          const fees = x.flatFees.filter((f) => f.matterId === matterId && f.status === 'unbilled');
+          const entries = rate ? x.timeEntries.filter((t) => t.matterId === matterId && !t.invoiced && t.billable) : [];
+          const lines: InvoiceLine[] = [
+            ...fees.map((f) => ({ description: f.description, amount: f.amount })),
+            ...entries.map((t) => {
+              const hours = billedMinutes(t.actualMinutes, x.billing) / 60;
+              return { date: t.date, description: t.description, hours, rate, amount: Math.round(hours * rate * 100) / 100 };
+            }),
+          ];
+          if (!lines.length) return x;
+          const nums = x.invoices.map((i) => Number(i.number.replace(/\D/g, ''))).filter(Boolean);
+          const inv: Invoice = {
+            id,
+            number: `INV-${Math.max(1041, ...nums) + 1}`,
+            matterId,
+            date: todayISO(),
+            lines,
+            total: lines.reduce((n, l) => n + l.amount, 0),
+            status: sendVia ? 'sent' : 'draft',
+            sentVia: sendVia,
+            sentAt: sendVia ? todayISO() : undefined,
+            timeEntryIds: entries.map((t) => t.id),
+            flatFeeIds: fees.map((f) => f.id),
+          };
+          return {
+            ...x,
+            invoices: [inv, ...x.invoices],
+            timeEntries: x.timeEntries.map((t) => (inv.timeEntryIds.includes(t.id) ? { ...t, invoiced: true } : t)),
+            flatFees: x.flatFees.map((f) => (inv.flatFeeIds.includes(f.id) ? { ...f, status: 'invoiced' } : f)),
+          };
+        });
+        return id;
+      },
+      sendInvoice(id: string, via: NonNullable<Invoice['sentVia']>) {
+        setS((x) => ({ ...x, invoices: x.invoices.map((i) => (i.id === id ? { ...i, status: i.status === 'paid' ? 'paid' : 'sent', sentVia: via, sentAt: todayISO() } : i)) }));
+      },
+      markInvoicePaid(id: string) {
+        setS((x) => {
+          const inv = x.invoices.find((i) => i.id === id);
+          if (!inv) return x;
+          return {
+            ...x,
+            invoices: x.invoices.map((i) => (i.id === id ? { ...i, status: 'paid', paidAt: todayISO() } : i)),
+            flatFees: x.flatFees.map((f) => (inv.flatFeeIds.includes(f.id) ? { ...f, status: 'paid' } : f)),
+          };
+        });
+      },
+      /** Deleting a draft puts its time and fees back into "unbilled". Sent invoices can't be deleted. */
+      deleteDraftInvoice(id: string) {
+        setS((x) => {
+          const inv = x.invoices.find((i) => i.id === id);
+          if (!inv || inv.status !== 'draft') return x;
+          return {
+            ...x,
+            invoices: x.invoices.filter((i) => i.id !== id),
+            timeEntries: x.timeEntries.map((t) => (inv.timeEntryIds.includes(t.id) ? { ...t, invoiced: false } : t)),
+            flatFees: x.flatFees.map((f) => (inv.flatFeeIds.includes(f.id) ? { ...f, status: 'unbilled' } : f)),
+          };
+        });
       },
       payFlatFee(id: string) {
         setS((x) => ({ ...x, flatFees: x.flatFees.map((f) => (f.id === id ? { ...f, status: 'paid' } : f)) }));
@@ -377,10 +442,21 @@ function useStoreValue() {
       },
 
       // ----- Tasks -----
+      setTaskStatus(id: string, status: Task['status']) {
+        setS((x) => ({
+          ...x,
+          tasks: x.tasks.map((t) => {
+            if (t.id !== id || t.status === status) return t;
+            const label = seed.TASK_STATUSES.find((q) => q.id === status)!.label;
+            const extra = status === 'stuck' && t.escalateTo ? [`${t.escalateTo === 'me' ? 'You were' : `${seed.teamName(t.escalateTo)} was`} notified that this is stuck`] : [];
+            return { ...t, status, done: status === 'done', doneAt: status === 'done' ? new Date().toISOString() : undefined, log: [...t.log, `Status: ${label}`, ...extra] };
+          }),
+        }));
+      },
       setTaskDone(id: string, done: boolean) {
         setS((x) => ({
           ...x,
-          tasks: x.tasks.map((t) => (t.id === id ? { ...t, done, doneAt: done ? new Date().toISOString() : undefined, log: [...t.log, done ? 'Marked done' : 'Reopened'] } : t)),
+          tasks: x.tasks.map((t) => (t.id === id ? { ...t, done, status: done ? 'done' : 'todo', doneAt: done ? new Date().toISOString() : undefined, log: [...t.log, done ? 'Status: Done' : 'Reopened'] } : t)),
         }));
       },
       updateTask(id: string, patch: Partial<Task>, logLine?: string) {
@@ -408,8 +484,21 @@ function useStoreValue() {
           ),
         }));
       },
-      addTask(t: Omit<Task, 'id' | 'done' | 'snoozes' | 'log' | 'source' | 'createdAt'>) {
-        setS((x) => ({ ...x, tasks: [...x.tasks, { ...t, id: newId('task'), done: false, snoozes: 0, log: ['Created'], source: 'manual', createdAt: new Date().toISOString() }] }));
+      deleteTask(id: string) {
+        setS((x) => ({ ...x, tasks: x.tasks.filter((t) => t.id !== id) }));
+      },
+      addChecklistItem(id: string, text: string) {
+        setS((x) => ({ ...x, tasks: x.tasks.map((t) => (t.id === id ? { ...t, checklist: [...t.checklist, { text, done: false }] } : t)) }));
+      },
+      removeChecklistItem(id: string, index: number) {
+        setS((x) => ({ ...x, tasks: x.tasks.map((t) => (t.id === id ? { ...t, checklist: t.checklist.filter((_, i) => i !== index) } : t)) }));
+      },
+      addTaskComment(id: string, text: string) {
+        const n: Note = { id: newId('n'), at: new Date().toISOString(), author: 'me', text };
+        setS((x) => ({ ...x, tasks: x.tasks.map((t) => (t.id === id ? { ...t, comments: [n, ...(t.comments ?? [])] } : t)) }));
+      },
+      addTask(t: Omit<Task, 'id' | 'done' | 'status' | 'snoozes' | 'log' | 'source' | 'createdAt'>) {
+        setS((x) => ({ ...x, tasks: [...x.tasks, { ...t, id: newId('task'), done: false, status: 'todo', snoozes: 0, log: ['Created'], source: 'manual', createdAt: new Date().toISOString() }] }));
       },
 
       // ----- Messages -----
@@ -497,7 +586,7 @@ function useStoreValue() {
     [s.matters, s.contacts, s.areas, s.pncs, s.roles],
   );
 
-  return { s, actions, lookup, screen, matterId, pncId, contactId, go, toast, notify };
+  return { s, actions, lookup, screen, matterId, pncId, contactId, go, toast, notify, taskId, openTask: setTaskId };
 }
 
 type Store = ReturnType<typeof useStoreValue>;

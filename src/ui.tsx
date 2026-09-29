@@ -66,13 +66,13 @@ export function ContactPill({ m }: { m: Matter }) {
 
 export function billingLabel(b: BillingArrangement) {
   if (b.kind === 'hourly') return `Hourly · ${money(b.rate)}/hr`;
-  if (b.kind === 'flat') return b.amount ? `Flat fee · ${money(b.amount)}` : 'Flat fee · not set';
-  return `Flat ${money(b.amount)} + ${money(b.rate)}/hr`;
+  if (b.kind === 'flat') return b.amount ? `Fixed price · ${money(b.amount)}` : 'Fixed price · not set';
+  return `Fixed ${money(b.amount)} + ${money(b.rate)}/hr`;
 }
 
 export function BillingPill({ b }: { b: BillingArrangement }) {
   const cls = b.kind === 'hourly' ? 'info' : b.kind === 'flat' ? 'accent' : 'warn';
-  const label = b.kind === 'hourly' ? 'Hourly' : b.kind === 'flat' ? 'Flat fee' : 'Hybrid';
+  const label = b.kind === 'hourly' ? 'Hourly' : b.kind === 'flat' ? 'Fixed price' : 'Hybrid';
   return <span className={`pill ${cls}`}>{label}</span>;
 }
 

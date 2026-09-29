@@ -21,19 +21,20 @@ export default function TimeBilling() {
     .sort((a, b) => b.total - a.total);
 
   const totalUnbilled = rows.reduce((a, r) => a + r.total, 0);
-  const outstanding = s.flatFees.filter((f) => f.status === 'invoiced').reduce((a, f) => a + f.amount, 0);
+  const outstanding = s.invoices.filter((i) => i.status === 'sent').reduce((a, i) => a + i.total, 0);
+  const drafts = s.invoices.filter((i) => i.status === 'draft');
   const recent = [...s.timeEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
 
   return (
     <>
-      <PageHead title="Time & billing" sub="Hourly, flat-fee and hybrid matters in one ledger. Billing rounds to your firm’s increment automatically.">
+      <PageHead title="Time & billing" sub="Hourly, fixed-price and hybrid matters in one ledger. Billing rounds to your firm’s increment automatically.">
         <button className="btn" onClick={() => go('settings')}>Rounding: {s.billing.incrementMinutes} min, {s.billing.mode === 'up' ? 'round up' : 'nearest'}</button>
       </PageHead>
 
       <div className="stats">
         <div className="stat"><span className="label">Ready to bill</span><span className="v">{money(totalUnbilled)}</span></div>
         <div className="stat"><span className="label">Invoiced, unpaid</span><span className="v">{money(outstanding)}</span></div>
-        <div className="stat"><span className="label">Matters with unbilled work</span><span className="v">{rows.length}</span></div>
+        <div className="stat"><span className="label">Draft invoices (not sent)</span><span className="v">{drafts.length}</span></div>
         <div className="stat"><span className="label">Billing increment</span><span className="v">{s.billing.incrementMinutes === 6 ? '0.1 hr' : `${s.billing.incrementMinutes} min`}</span></div>
       </div>
 
@@ -43,7 +44,7 @@ export default function TimeBilling() {
           <div className="table-wrap">
             <table className="t">
               <thead>
-                <tr><th>Matter</th><th>Fee type</th><th className="r">Hours</th><th className="r">Hourly</th><th className="r">Flat</th><th className="r">Total</th><th /></tr>
+                <tr><th>Matter</th><th>Fee type</th><th className="r">Hours</th><th className="r">Hourly</th><th className="r">Fixed price</th><th className="r">Total</th><th /></tr>
               </thead>
               <tbody>
                 {rows.map(({ m, mins, hourly, flat, total }) => (
@@ -84,7 +85,7 @@ export default function TimeBilling() {
                 </tbody>
               </table>
             </div>
-            <p className="small muted">Clients see billed hours. You keep the actual minutes, so you can see which flat fees are really profitable.</p>
+            <p className="small muted">Clients see billed hours. You keep the actual minutes, so you can see which fixed prices are really profitable.</p>
           </div>
         </section>
       </div>
@@ -105,7 +106,7 @@ export default function TimeBilling() {
                     <td style={{ minWidth: 220 }}>{t.description}</td>
                     <td className="r num muted">{t.actualMinutes}m</td>
                     <td className="r num">{formatHours(billedMinutes(t.actualMinutes, s.billing), s.billing)}</td>
-                    <td className="r num">{t.billable ? (entryValue(t, m, s.billing) ? money(entryValue(t, m, s.billing)) : 'In flat fee') : 'No charge'}</td>
+                    <td className="r num">{t.billable ? (entryValue(t, m, s.billing) ? money(entryValue(t, m, s.billing)) : 'In fixed price') : 'No charge'}</td>
                   </tr>
                 );
               })}

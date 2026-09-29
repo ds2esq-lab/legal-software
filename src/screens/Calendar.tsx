@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { daysFromToday, fmtTime, PageHead, startOfToday } from '../ui';
 
 export default function Calendar() {
-  const { s, lookup, go } = useStore();
+  const { s, lookup, go, openTask } = useStore();
   const [offset, setOffset] = useState(0);
   const start = startOfToday();
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * 7); // Monday
@@ -44,7 +44,7 @@ export default function Calendar() {
               </div>
               <div className="day-body">
                 {dls.map((r) => (
-                  <button key={r.id} className="ev deadline" onClick={() => go('tasks')}>
+                  <button key={r.id} className="ev deadline" onClick={() => openTask(r.id)}>
                     <strong>Due {fmtTime(r.due)}</strong>
                     <div>{r.title}</div>
                   </button>

@@ -13,8 +13,10 @@ const INTEGRATIONS = [
   { name: 'Calendar', detail: 'Google and Microsoft 365, two-way sync. Booking-link availability comes from here.', status: 'Planned' },
   { name: 'Email', detail: 'Outlook and Gmail. Emails to and from a client are filed on the matter and count as contact.', status: 'Planned' },
   { name: 'Slack', detail: 'Post milestone and closeout alerts to your existing channels while the team moves over.', status: 'Planned' },
-  { name: 'Payments', detail: 'Card and ACH with trust vs. operating account separation (IOLTA-safe).', status: 'Planned' },
+  { name: 'LawPay', detail: 'Card and eCheck payments from invoices and the client portal. Each payment is deposited to trust or operating correctly, with processing fees always charged to operating. Payments post back to the invoice automatically.', status: 'Planned' },
   { name: 'E-signature', detail: 'Engagement letters and documents signed inside the client portal.', status: 'Planned' },
+  { name: 'Zapier', detail: 'Connect to 6,000+ apps. Triggers: new PNC matter, matter changed stage, milestone completed, task done, invoice paid, conflict check recorded. Actions: create a PNC matter or contact, add a note, create a task, log a client contact.', status: 'Planned' },
+  { name: 'Open API + webhooks', detail: 'The same events Zapier uses, available to any tool or developer, so nothing is locked in.', status: 'Planned' },
   { name: 'monday.com import', detail: 'One-time import of open matters, milestone dates and completed-matter history.', status: 'Planned' },
 ];
 

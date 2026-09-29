@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import { documents, teamName } from '../data';
-import { billedMinutes, money } from '../billing';
-import { hourlyRate } from '../calc';
-import { fmtTime, PageHead, relDay } from '../ui';
+import { money } from '../billing';
+import { fmtDate, fmtTime, PageHead, relDay } from '../ui';
 
 export default function Portal() {
   const { s, matterId, lookup, actions, go, notify } = useStore();
@@ -16,11 +15,8 @@ export default function Portal() {
   const stageIdx = Math.max(0, stages.findIndex((x) => x.id === m.stageId));
   const msgs = s.messages.filter((x) => x.channel === m.id && x.clientVisible).sort((a, b) => a.at.localeCompare(b.at));
   const docs = (documents[m.id] ?? []).filter((d) => d.shared);
-  const fees = s.flatFees.filter((f) => f.matterId === m.id && f.status !== 'unbilled');
-  const hourlyInvoiced = s.timeEntries
-    .filter((t) => t.matterId === m.id && t.invoiced && t.billable)
-    .reduce((n, t) => n + (billedMinutes(t.actualMinutes, s.billing) / 60) * hourlyRate(m), 0);
-  const [hourlyPaid, setHourlyPaid] = useState(false);
+  const invs = s.invoices.filter((i) => i.matterId === m.id && i.status !== 'draft');
+
 
   return (
     <>
@@ -91,19 +87,13 @@ export default function Portal() {
               <section className="panel">
                 <div className="panel-head"><h2>Invoices</h2></div>
                 <ul className="list">
-                  {fees.length === 0 && hourlyInvoiced === 0 && <li className="muted small">No invoices yet.</li>}
-                  {fees.map((f) => (
-                    <li key={f.id} className="spread">
-                      <span style={{ minWidth: 0 }}>{f.description}<div className="num small muted">{money(f.amount)}</div></span>
-                      {f.status === 'paid' ? <span className="pill ok">Paid</span> : <button className="btn sm primary" onClick={() => { actions.payFlatFee(f.id); notify('Payment received. Receipt emailed.'); }}>Pay {money(f.amount)}</button>}
+                  {invs.length === 0 && <li className="muted small">No invoices yet.</li>}
+                  {invs.map((i) => (
+                    <li key={i.id} className="spread">
+                      <span style={{ minWidth: 0 }}>{i.number} · {fmtDate(i.date)}<div className="num small muted">{money(i.total)}</div></span>
+                      {i.status === 'paid' ? <span className="pill ok">Paid</span> : <button className="btn sm primary" onClick={() => { actions.markInvoicePaid(i.id); notify('Paid through LawPay (simulated). Receipt emailed; invoice marked paid.'); }}>Pay {money(i.total)} · card or eCheck</button>}
                     </li>
                   ))}
-                  {hourlyInvoiced > 0 && (
-                    <li className="spread">
-                      <span>Legal services (hourly)<div className="num small muted">{money(hourlyInvoiced)}</div></span>
-                      {hourlyPaid ? <span className="pill ok">Paid</span> : <button className="btn sm primary" onClick={() => { setHourlyPaid(true); notify('Payment received. Receipt emailed.'); }}>Pay {money(hourlyInvoiced)}</button>}
-                    </li>
-                  )}
                 </ul>
               </section>
               <section className="panel">

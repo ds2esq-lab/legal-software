@@ -1,8 +1,29 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { TEAM, teamName, type Task, type TaskKind } from '../data';
+import { TASK_STATUSES, TEAM, teamName, type Task, type TaskKind, type TaskStatus } from '../data';
 import { todayISO } from '../practice';
 import { daysFromToday, fmtDate, fmtTime, PageHead, Person, relDay } from '../ui';
+
+export function StatusSelect({ t, id }: { t: Task; id: string }) {
+  const { actions, notify } = useStore();
+  const st = TASK_STATUSES.find((x) => x.id === t.status)!;
+  return (
+    <select
+      className={`input small tight status-select tone-${st.tone || 'plain'}`}
+      id={id}
+      aria-label="Task status"
+      value={t.status}
+      onChange={(e) => {
+        const v = e.target.value as TaskStatus;
+        actions.setTaskStatus(t.id, v);
+        if (v === 'stuck' && t.escalateTo) notify(`Marked stuck. ${t.escalateTo === 'me' ? 'You’ve' : `${teamName(t.escalateTo)} has`} been notified.`);
+        else if (v === 'done') notify('Done. Logged on the matter.');
+      }}
+    >
+      {TASK_STATUSES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+    </select>
+  );
+}
 
 export const KIND_LABEL: Record<TaskKind, string> = {
   internal: 'Task',
@@ -21,8 +42,7 @@ function ladder(t: Task) {
 }
 
 export function TaskRow({ t, showMatter = true }: { t: Task; showMatter?: boolean }) {
-  const { actions, lookup, go, notify } = useStore();
-  const [open, setOpen] = useState(false);
+  const { actions, lookup, go, notify, openTask } = useStore();
   const late = !t.done && new Date(t.due).getTime() < Date.now();
   const soon = !late && daysFromToday(t.due) <= 1;
   const hard = isHard(t.kind);
@@ -49,8 +69,9 @@ export function TaskRow({ t, showMatter = true }: { t: Task; showMatter?: boolea
       />
       <div style={{ minWidth: 0 }}>
         <div className="row" style={{ gap: 6 }}>
-          <button className="link task-title" style={{ color: 'var(--ink)', textDecoration: t.done ? 'line-through' : undefined }} onClick={() => setOpen((o) => !o)}>{t.title}</button>
+          <button className="link task-title" style={{ color: 'var(--ink)', textDecoration: t.done ? 'line-through' : undefined }} onClick={() => openTask(t.id)} title="Open task">{t.title}</button>
           <span className={`pill ${hard ? 'danger' : t.kind === 'client' ? 'info' : ''}`}>{KIND_LABEL[t.kind]}</span>
+          <StatusSelect t={t} id={`st-${t.id}`} />
           {t.source === 'stage' && <span className="pill" title="Created automatically by a stage">Auto</span>}
           {t.checklist.length > 0 && <span className={`pill ${doneCount === t.checklist.length ? 'ok' : ''}`}>{doneCount}/{t.checklist.length}</span>}
         </div>
@@ -64,51 +85,6 @@ export function TaskRow({ t, showMatter = true }: { t: Task; showMatter?: boolea
         {!t.done && (
           <div className="ladder" aria-label="Nudge schedule">
             {ladder(t).map((s, i) => <span key={i} className={s.hit ? 'hit' : ''}>{s.label}</span>)}
-          </div>
-        )}
-        {open && (
-          <div className="task-detail stack">
-            {t.checklist.length > 0 && (
-              <ul className="checklist">
-                {t.checklist.map((c, i) => (
-                  <li key={i}>
-                    <label className="row" style={{ gap: 6 }}>
-                      <input type="checkbox" id={`cl-${t.id}-${i}`} checked={c.done} onChange={() => actions.toggleChecklist(t.id, i)} />
-                      <span style={{ textDecoration: c.done ? 'line-through' : undefined }}>{c.text}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="row" style={{ gap: 8 }}>
-              <div className="field">
-                <label htmlFor={`due-${t.id}`}>Due</label>
-                <input
-                  className="input small tight num"
-                  type="date"
-                  id={`due-${t.id}`}
-                  value={t.due.slice(0, 10)}
-                  disabled={hard && t.snoozes > 0}
-                  onChange={(e) => e.target.value && actions.updateTask(t.id, { due: new Date(e.target.value + 'T17:00:00').toISOString() }, `Due date changed to ${fmtDate(e.target.value)}`)}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor={`who-${t.id}`}>Assigned to</label>
-                <select className="input small tight" id={`who-${t.id}`} value={t.assignee} onChange={(e) => actions.updateTask(t.id, { assignee: e.target.value }, `Reassigned to ${teamName(e.target.value)}`)}>
-                  {TEAM.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor={`esc-${t.id}`}>Backup</label>
-                <select className="input small tight" id={`esc-${t.id}`} value={t.escalateTo ?? ''} onChange={(e) => actions.updateTask(t.id, { escalateTo: e.target.value || undefined })}>
-                  <option value="">None</option>
-                  {TEAM.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-              </div>
-            </div>
-            <ul className="small muted" style={{ margin: 0, paddingLeft: 18 }}>
-              {t.log.length ? t.log.map((l, i) => <li key={i}>{l}</li>) : <li>No activity yet.</li>}
-            </ul>
           </div>
         )}
       </div>
@@ -193,8 +169,9 @@ export default function Tasks() {
   const { s } = useStore();
   const [who, setWho] = useState('me');
   const [adding, setAdding] = useState(false);
+  const [status, setStatus] = useState<TaskStatus | 'open'>('open');
   const now = Date.now();
-  const mine = s.tasks.filter((t) => who === 'all' || t.assignee === who);
+  const mine = s.tasks.filter((t) => who === 'all' || t.assignee === who).filter((t) => status === 'open' || t.status === status || (status === 'done' && t.done));
   const open = mine.filter((t) => !t.done).sort((a, b) => a.due.localeCompare(b.due));
   const groups: [string, Task[]][] = [
     ['Overdue', open.filter((t) => new Date(t.due).getTime() < now)],
@@ -213,6 +190,14 @@ export default function Tasks() {
         </select>
         <button className="btn primary" onClick={() => setAdding((a) => !a)}>{adding ? 'Cancel' : '+ New task'}</button>
       </PageHead>
+      <div className="seg" role="group" aria-label="Filter by status" style={{ alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+        <button aria-pressed={status === 'open'} onClick={() => setStatus('open')}>All</button>
+        {TASK_STATUSES.map((x) => (
+          <button key={x.id} aria-pressed={status === x.id} onClick={() => setStatus(x.id)}>
+            {x.label} <span className="num muted">{s.tasks.filter((t) => (who === 'all' || t.assignee === who) && t.status === x.id).length}</span>
+          </button>
+        ))}
+      </div>
 
       {adding && <section className="panel"><NewTaskForm onDone={() => setAdding(false)} /></section>}
 
@@ -229,5 +214,136 @@ export default function Tasks() {
         ) : null,
       )}
     </>
+  );
+}
+
+/** Full task view, opened from anywhere a task appears. */
+export function TaskDrawer() {
+  const { s, actions, lookup, go, notify, taskId, openTask } = useStore();
+  const [item, setItem] = useState('');
+  const [comment, setComment] = useState('');
+  const t = s.tasks.find((x) => x.id === taskId);
+  if (!taskId) return null;
+  const close = () => openTask(null);
+  if (!t) return null;
+  const hard = isHard(t.kind);
+  const snoozesLeft = Math.max(0, 3 - t.snoozes);
+  const m = t.matterId ? lookup.matter(t.matterId) : undefined;
+  const p = t.pncId ? lookup.pnc(t.pncId) : undefined;
+  const up = (patch: Partial<Task>, line?: string) => actions.updateTask(t.id, patch, line);
+
+  return (
+    <div className="drawer-wrap" onKeyDown={(e) => e.key === 'Escape' && close()}>
+      <button className="drawer-scrim" aria-label="Close task" onClick={close} />
+      <aside className="drawer" role="dialog" aria-label={`Task: ${t.title}`}>
+        <div className="drawer-head">
+          <span className={`pill ${hard ? 'danger' : t.kind === 'client' ? 'info' : ''}`}>{KIND_LABEL[t.kind]}</span>
+          {t.source === 'stage' && <span className="pill">Auto</span>}
+          {t.done ? <span className="pill ok">Done</span> : new Date(t.due).getTime() < Date.now() ? <span className="pill danger">Overdue</span> : null}
+          <span style={{ flex: 1 }} />
+          <button className="btn sm ghost icon" aria-label="Close" onClick={close}>×</button>
+        </div>
+        <div className="drawer-body stack" style={{ gap: 14 }}>
+          <input className="input drawer-title" id="td-title" aria-label="Task title" value={t.title} onChange={(e) => up({ title: e.target.value })} />
+          {(m || p) && (
+            <button className="link small" style={{ alignSelf: 'flex-start' }} onClick={() => { close(); m ? go('matter', m.id) : go('pnc', p!.id); }}>
+              {m ? `${m.name} · ${lookup.areaOf(m).name}` : `PNC: ${lookup.clientOf(p!)?.name} · ${p!.title}`} →
+            </button>
+          )}
+
+          <div className="row" style={{ gap: 8 }}>
+            <button className={`btn ${t.done ? '' : 'primary'}`} onClick={() => { actions.setTaskDone(t.id, !t.done); notify(t.done ? 'Task reopened' : 'Done. Logged on the matter.'); }}>
+              {t.done ? 'Reopen task' : '✓ Mark done'}
+            </button>
+            {!t.done && !hard && (
+              <>
+                <button className="btn" disabled={!snoozesLeft} onClick={() => { actions.snoozeTask(t.id, '1 hour', 1); notify('Snoozed 1 hour'); }}>Snooze 1h</button>
+                <button className="btn" disabled={!snoozesLeft} onClick={() => { actions.snoozeTask(t.id, 'until tomorrow', 24); notify('Snoozed until tomorrow'); }}>Tomorrow</button>
+                <span className="small muted">{snoozesLeft ? `${snoozesLeft} snooze${snoozesLeft === 1 ? '' : 's'} left` : 'No snoozes left'}</span>
+              </>
+            )}
+            {hard && !t.done && <span className="small muted">Court and statute deadlines can’t be snoozed.</span>}
+          </div>
+
+          <div className="grid cols-2" style={{ gap: 10 }}>
+            <div className="field">
+              <label htmlFor="td-status">Status</label>
+              <StatusSelect t={t} id="td-status" />
+            </div>
+            <div className="field">
+              <label htmlFor="td-due">Due date</label>
+              <input className="input num" type="date" id="td-due" value={t.due.slice(0, 10)} onChange={(e) => e.target.value && up({ due: new Date(e.target.value + 'T17:00:00').toISOString() }, `Due date changed to ${fmtDate(e.target.value)}`)} />
+            </div>
+            <div className="field">
+              <label htmlFor="td-kind">Type</label>
+              <select className="input" id="td-kind" value={t.kind} onChange={(e) => up({ kind: e.target.value as TaskKind }, `Type changed to ${KIND_LABEL[e.target.value as TaskKind]}`)}>
+                {Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="td-who">Assigned to</label>
+              <select className="input" id="td-who" value={t.assignee} onChange={(e) => up({ assignee: e.target.value }, `Reassigned to ${teamName(e.target.value)}`)}>
+                {TEAM.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="td-esc">Backup (after 3 snoozes)</label>
+              <select className="input" id="td-esc" value={t.escalateTo ?? ''} onChange={(e) => up({ escalateTo: e.target.value || undefined })}>
+                <option value="">None</option>
+                {TEAM.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <section>
+            <div className="label" style={{ marginBottom: 6 }}>Checklist {t.checklist.length > 0 && `· ${t.checklist.filter((c) => c.done).length}/${t.checklist.length}`}</div>
+            <ul className="checklist">
+              {t.checklist.map((c, i) => (
+                <li key={i} className="spread">
+                  <label className="row" style={{ gap: 6 }}>
+                    <input type="checkbox" id={`td-cl-${i}`} checked={c.done} onChange={() => actions.toggleChecklist(t.id, i)} />
+                    <span style={{ textDecoration: c.done ? 'line-through' : undefined }}>{c.text}</span>
+                  </label>
+                  <button className="btn sm ghost icon" aria-label={`Remove ${c.text}`} onClick={() => actions.removeChecklistItem(t.id, i)}>×</button>
+                </li>
+              ))}
+            </ul>
+            <form className="row" style={{ gap: 6, marginTop: 6 }} onSubmit={(e) => { e.preventDefault(); if (item.trim()) { actions.addChecklistItem(t.id, item.trim()); setItem(''); } }}>
+              <input className="input small" style={{ flex: 1 }} id="td-add-item" aria-label="New checklist item" placeholder="Add a checklist item" value={item} onChange={(e) => setItem(e.target.value)} />
+              <button className="btn sm" type="submit">Add</button>
+            </form>
+          </section>
+
+          <section>
+            <div className="label" style={{ marginBottom: 6 }}>Comments</div>
+            <form className="stack" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); if (comment.trim()) { actions.addTaskComment(t.id, comment.trim()); setComment(''); } }}>
+              <textarea className="input" rows={2} id="td-comment" aria-label="New comment" placeholder="e.g. Left voicemail; will try again Thursday" value={comment} onChange={(e) => setComment(e.target.value)} />
+              <div><button className="btn sm" type="submit" disabled={!comment.trim()}>Add comment</button></div>
+            </form>
+            <ul className="list" style={{ marginTop: 6 }}>
+              {(t.comments ?? []).map((c) => (
+                <li key={c.id} style={{ display: 'block', paddingInline: 0 }}>
+                  <div className="small muted"><strong style={{ color: 'var(--ink)' }}>{teamName(c.author)}</strong> · {relDay(c.at)} {fmtTime(c.at)}</div>
+                  <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section>
+            <div className="label" style={{ marginBottom: 6 }}>History</div>
+            <ul className="small muted" style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Created {fmtDate(t.createdAt)}{t.source === 'stage' ? ' automatically by a stage' : ''}</li>
+              {t.log.map((l, i) => <li key={i}>{l}</li>)}
+            </ul>
+          </section>
+
+          <div className="row" style={{ justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+            <span className="small muted">Nudges: {ladder(t).map((x) => x.label).join(' · ')}</span>
+            <button className="btn sm danger" onClick={() => { actions.deleteTask(t.id); close(); notify('Task deleted'); }}>Delete task</button>
+          </div>
+        </div>
+      </aside>
+    </div>
   );
 }

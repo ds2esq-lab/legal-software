@@ -2,7 +2,7 @@ import type { Matter, TimeEntry } from './data';
 import { billedMinutes, type BillingSettings } from './billing';
 import { contactState, addDays, dueFor, todayISO, type PracticeArea } from './practice';
 
-/** Hourly rate that applies to time on this matter; flat-fee time is tracked but not charged. */
+/** Hourly rate that applies to time on this matter; fixed-price time is tracked but not charged. */
 export function hourlyRate(m: Matter): number {
   if (m.billing.kind === 'hourly') return m.billing.rate;
   if (m.billing.kind === 'hybrid') return m.billing.rate;
