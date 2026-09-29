@@ -15,7 +15,8 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Client matters | Open matters and former clients. A board per practice area with that area's own stages; table view with inline Whose Ball and suspense dates |
 | Matter page | People and roles, notes, Whose Ball, last contact, suspense date, milestone timeline with editable due dates, closeout checklist |
 | Time & billing | Hourly, fixed-price and hybrid matters; configurable rounding (6-minute default) |
-| Scheduling | Calendly-style booking links; bookings create leads, events and conflict checks |
+| Scheduling | Meeting types defined once for many hosts and locations; per-person availability schedules; routing form; bookings create PNC matters or attach to Client matters, and a held meeting completes its milestone |
+| Documents | Each matter's SharePoint folder, created from a per-practice-area template and shown inside the matter; share to the portal, request e-signature, versions |
 | Tasks | Owner, due date, checklist, nudges that escalate to a backup after three snoozes; court and statute deadlines can't be snoozed; stage tasks created automatically |
 | Calendar | Meetings, consults and court deadlines in one week view |
 | Messages | Firm channels plus a thread per matter; team-only vs client-visible |

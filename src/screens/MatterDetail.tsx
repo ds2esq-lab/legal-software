@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { documents, TEAM, type Matter } from '../data';
+import { TEAM, type Matter } from '../data';
 import { billedMinutes, formatHours, money } from '../billing';
 import { entryValue, hourlyRate, nextActions } from '../calc';
 import { dueFor, ruleText, todayISO, type PracticeArea } from '../practice';
@@ -10,6 +10,7 @@ import { NotesPanel, PartiesPanel } from '../people';
 import { ConflictBadge, ConflictPanel, uncheckedParties } from '../conflictPanel';
 import { NewTaskForm, TaskRow } from './Tasks';
 import { ExpensesTab, TrustTab } from './MatterMoney';
+import { MatterDocs } from './MatterDocs';
 import * as T from '../trust';
 
 type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'trust' | 'expenses' | 'time' | 'billing' | 'messages' | 'documents';
@@ -393,7 +394,6 @@ export default function MatterDetail() {
   const stageIdx = area.stages.findIndex((x) => x.id === m.stageId);
   const closing = stageIdx >= area.stages.length - 2;
   const upcoming = [...nextActions(m, area), ...s.tasks.filter((t) => t.matterId === m.id && !t.done).map((t) => ({ date: t.due.slice(0, 10), what: t.title, kind: 'task' as const, taskId: t.id }))].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 4);
-  const docs = documents[m.id] ?? [];
   const up = (patch: Partial<Matter>) => actions.updateMatter(m.id, patch);
   const openTasks = s.tasks.filter((t) => t.matterId === m.id && !t.done).sort((a, b) => a.due.localeCompare(b.due));
   const doneTasks = s.tasks.filter((t) => t.matterId === m.id && t.done);
@@ -518,6 +518,7 @@ export default function MatterDetail() {
         {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'expenses', 'billing', 'trust', 'messages', 'documents'] as Tab[]).filter((t) => (t !== 'time' || access.can('time')) && (t !== 'billing' || access.can('billingView')) && (t !== 'trust' || access.can('billingView')) && (t !== 'expenses' || access.can('time') || access.can('billingView'))).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
+            {t === 'documents' && s.docFiles.some((d) => d.matterId === m.id) && <span className="num muted"> {s.docFiles.filter((d) => d.matterId === m.id).length}</span>}
             {t === 'trust' && T.balanceOf(m.id, s.trustTxns) > 0 && <span className="num muted"> {money(T.balanceOf(m.id, s.trustTxns))}</span>}
             {t === 'tasks' && openTasks.length > 0 && <span className="num muted"> {openTasks.length}</span>}
             {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
@@ -550,23 +551,7 @@ export default function MatterDetail() {
         <InvoiceList m={m} />
       )}
       {tab === 'messages' && <section className="panel"><Thread channel={m.id} allowClient clientName={client?.name} /></section>}
-      {tab === 'documents' && (
-        <section className="panel">
-          <div className="panel-head"><h2>Documents</h2><button className="btn sm">Upload</button></div>
-          <ul className="list">
-            {docs.length === 0 && <li className="muted">No documents yet.</li>}
-            {docs.map((d) => (
-              <li key={d.name} className="spread">
-                <span className="row"><span className="pill num">{d.kind}</span>{d.name}</span>
-                <span className="row">
-                  {d.needsSignature && <span className="pill warn">Awaiting signature</span>}
-                  {d.shared ? <span className="pill info">Shared with client</span> : <span className="pill">Internal</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {tab === 'documents' && <MatterDocs m={m} />}
       <p className="small muted">{s.timeEntries.filter((t) => t.matterId === m.id).length} time entries · opened {fmtDate(m.opened)}</p>
     </>
   );

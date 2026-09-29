@@ -3,6 +3,8 @@ import * as seed from './data';
 import type { Invoice, InvoiceLine, Perm, PermRole, UserAccess } from './data';
 import * as trust from './trust';
 import * as sched from './sched';
+import * as docs from './docs';
+import type { DocFile, DocSettings } from './docs';
 import type { Booking, MeetingType, RoutingForm, Schedule } from './sched';
 import type { BankTxn, Expense, Reconciliation, Replenishment, TrustTxn } from './trust';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
@@ -62,6 +64,9 @@ interface State {
   schedules: Schedule[];
   routing: RoutingForm;
   bookings: Booking[];
+  docSettings: DocSettings;
+  docFiles: DocFile[];
+  docFolders: Record<string, string[]>; // extra folders added per matter
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
   invoices: Invoice[];
@@ -76,8 +81,8 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v8';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing'>> {
+const CONFIG_KEY = 'docket.config.v9';
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -109,6 +114,9 @@ function initialState(): State {
     schedules: cfg.schedules ?? sched.SCHEDULES,
     routing: cfg.routing ?? sched.ROUTING,
     bookings: [],
+    docSettings: cfg.docSettings ?? docs.DEFAULT_DOC_SETTINGS,
+    docFiles: docs.DOC_FILES,
+    docFolders: {},
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
     invoices: seed.invoices,
@@ -195,11 +203,11 @@ function useStoreValue() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing, docSettings: s.docSettings }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing]);
+  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing, s.docSettings]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -801,6 +809,31 @@ function useStoreValue() {
           if (status === 'held' && b.pncId) next = { ...next, pncs: next.pncs.map((p) => (p.id === b.pncId && p.stage === 'scheduled' ? { ...p, stage: 'notes' } : p)) };
           return next;
         });
+      },
+
+      // ----- Documents -----
+      setDocSettings(d: DocSettings) {
+        setS((x) => ({ ...x, docSettings: d }));
+      },
+      uploadDocs(matterId: string, folder: string, files: { name: string; sizeKb: number }[]) {
+        setS((x) => {
+          const next = [...x.docFiles];
+          for (const f of files) {
+            const existing = next.find((d) => d.matterId === matterId && d.folder === folder && d.name === f.name);
+            if (existing) Object.assign(existing, { version: existing.version + 1, modified: todayISO(), modifiedBy: x.viewAs, sizeKb: f.sizeKb });
+            else next.push({ id: newId('doc'), matterId, folder, name: f.name, sizeKb: f.sizeKb, modified: todayISO(), modifiedBy: x.viewAs, version: 1, shared: false });
+          }
+          return { ...x, docFiles: next.map((d) => ({ ...d })) };
+        });
+      },
+      updateDoc(id: string, patch: Partial<DocFile>) {
+        setS((x) => ({ ...x, docFiles: x.docFiles.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
+      },
+      deleteDoc(id: string) {
+        setS((x) => ({ ...x, docFiles: x.docFiles.filter((d) => d.id !== id) }));
+      },
+      addFolder(matterId: string, name: string) {
+        setS((x) => ({ ...x, docFolders: { ...x.docFolders, [matterId]: [...(x.docFolders[matterId] ?? []), name] } }));
       },
 
       // ----- Phone -----

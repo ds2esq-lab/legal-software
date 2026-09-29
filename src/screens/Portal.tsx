@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { documents, teamName } from '../data';
+import { teamName } from '../data';
 import { money } from '../billing';
 import * as T from '../trust';
 import { fmtDate, fmtTime, PageHead, relDay } from '../ui';
@@ -15,7 +15,7 @@ export default function Portal() {
   const stages = area.stages;
   const stageIdx = Math.max(0, stages.findIndex((x) => x.id === m.stageId));
   const msgs = s.messages.filter((x) => x.channel === m.id && x.clientVisible).sort((a, b) => a.at.localeCompare(b.at));
-  const docs = (documents[m.id] ?? []).filter((d) => d.shared);
+  const docs = s.docFiles.filter((d) => d.matterId === m.id && d.shared).map((d) => ({ ...d, needsSignature: d.signature === 'requested' }));
   const invs = s.invoices.filter((i) => i.matterId === m.id && i.status !== 'draft');
 
 
@@ -78,9 +78,9 @@ export default function Portal() {
                 <ul className="list">
                   {docs.length === 0 && <li className="muted small">Nothing shared yet.</li>}
                   {docs.map((d) => (
-                    <li key={d.name} className="spread">
+                    <li key={d.id} className="spread">
                       <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{d.name}</span>
-                      {d.needsSignature ? <button className="btn sm primary" onClick={() => notify('E-signature opens here (planned integration)')}>Review & sign</button> : <button className="btn sm">View</button>}
+                      {d.needsSignature ? <button className="btn sm primary" onClick={() => { actions.updateDoc(d.id, { signature: 'signed' }); notify('Signed (simulated e-signature). The signed copy is saved to the matter folder.'); }}>Review & sign</button> : d.signature === 'signed' ? <span className="pill ok">Signed</span> : <button className="btn sm" onClick={() => notify(`Opens ${d.name}`)}>View</button>}
                     </li>
                   ))}
                 </ul>

@@ -7,7 +7,7 @@ import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data'
 import * as T from '../trust';
 import { PageHead } from '../ui';
 
-type Section = 'users' | 'numbering' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -400,6 +400,62 @@ function NumberingEditor() {
   );
 }
 
+function DocsEditor() {
+  const { s, actions } = useStore();
+  const d = s.docSettings;
+  const [areaId, setAreaId] = useState(s.areas[0]?.id);
+  const set = (p: Partial<typeof d>) => actions.setDocSettings({ ...d, ...p });
+  const tpl = d.templates[areaId] ?? [];
+  const setTpl = (list: string[]) => set({ templates: { ...d.templates, [areaId]: list } });
+  const sample = s.matters.find((m) => m.areaId === areaId && m.status === 'open') ?? s.matters[0];
+  const client = s.contacts.find((c) => c.id === sample.parties[0]?.contactId);
+  const area = s.areas.find((a) => a.id === areaId);
+  const preview = d.pattern.replace(/\{NUMBER\}/g, sample.number).replace(/\{CLIENT\}/g, (client?.name ?? 'Client').split(',')[0]).replace(/\{AREA\}/g, area?.name ?? '').replace(/\{YEAR\}/g, sample.opened.slice(0, 4));
+  return (
+    <div className="grid cols-2">
+      <section className="panel">
+        <div className="panel-head"><h2>Where documents live</h2><span className="pill info">SharePoint (planned connection)</span></div>
+        <div className="panel-body stack" style={{ gap: 10 }}>
+          <div className="field"><label htmlFor="doc-site">SharePoint site and library</label><input className="input" id="doc-site" value={d.site} onChange={(e) => set({ site: e.target.value })} /></div>
+          <div className="grid cols-2" style={{ gap: 10 }}>
+            <div className="field"><label htmlFor="doc-open">Folder for open matters</label><input className="input" id="doc-open" value={d.openRoot} onChange={(e) => set({ openRoot: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-closed">Folder for closed matters</label><input className="input" id="doc-closed" value={d.closedRoot} onChange={(e) => set({ closedRoot: e.target.value })} /></div>
+          </div>
+          <label className="row small" style={{ gap: 6 }}><input type="checkbox" id="doc-move" checked={d.moveOnClose} onChange={(e) => set({ moveOnClose: e.target.checked })} /> Move a matter’s folder to “{d.closedRoot}” when the matter closes</label>
+          <div className="field">
+            <label htmlFor="doc-pattern">Matter folder name</label>
+            <input className="input num" id="doc-pattern" value={d.pattern} onChange={(e) => set({ pattern: e.target.value })} />
+            <span className="small muted">Building blocks: <code>{'{NUMBER}'}</code> <code>{'{CLIENT}'}</code> <code>{'{AREA}'}</code> <code>{'{YEAR}'}</code> · Example: <strong>{preview}</strong></span>
+          </div>
+          <p className="small muted">Every PC keeps using the OneDrive sync app, pointed at this library, so files still open from File Explorer. The app shows each matter’s folder inside the matter and keeps the two in step.</p>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Folder template</h2>
+          <select className="input small tight" id="doc-area" aria-label="Practice area" value={areaId} onChange={(e) => setAreaId(e.target.value)}>
+            {s.areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <ul className="list">
+          {tpl.map((f, i) => (
+            <li key={i} className="spread">
+              <input className="input small" style={{ flex: 1 }} id={`tpl-${i}`} aria-label="Folder name" value={f} onChange={(e) => setTpl(tpl.map((x, k) => (k === i ? e.target.value : x)))} />
+              <button className="btn sm ghost icon" aria-label="Move up" disabled={i === 0} onClick={() => setTpl(move(tpl, i, -1))}>↑</button>
+              <button className="btn sm ghost icon" aria-label="Move down" disabled={i === tpl.length - 1} onClick={() => setTpl(move(tpl, i, 1))}>↓</button>
+              <button className="btn sm ghost icon danger" aria-label={`Remove ${f}`} onClick={() => setTpl(tpl.filter((_, k) => k !== i))}>×</button>
+            </li>
+          ))}
+        </ul>
+        <div className="panel-body stack" style={{ gap: 6 }}>
+          <AddRow id="add-tpl" placeholder="New folder, e.g. 07 Billing" onAdd={(v) => setTpl([...tpl, v])} />
+          <span className="small muted">New {area?.name} matters get these folders automatically when they open.</span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function UsersEditor() {
   const { s, actions, notify, access } = useStore();
   const setRole = (r: PermRole) => actions.setPermRoles(s.permRoles.map((x) => (x.id === r.id ? r : x)));
@@ -516,7 +572,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -545,6 +601,7 @@ export default function Settings() {
 
       {section === 'users' && access.can('users') && <UsersEditor />}
       {section === 'numbering' && <NumberingEditor />}
+      {section === 'documents' && <DocsEditor />}
       {section === 'trust' && (
         <div className="grid cols-2">
           <section className="panel">
