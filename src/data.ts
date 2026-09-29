@@ -353,13 +353,16 @@ export interface UserAccess {
   areas: 'all' | string[]; // practice areas they can see Client matters in
   measure?: 'fixed' | 'hourly' | 'both'; // attorneys: which numbers they're measured on
   goal?: number; // quarterly goal for the headline number
+  manager?: string; // who they report to; leaders see their whole organization
+  scorecard?: string[]; // metric ids shown on their dashboard, headline first (see scorecard.ts)
+  goals?: Record<string, number>; // quarterly goals per metric (fees use `goal`)
 }
 export const DEFAULT_USERS: UserAccess[] = [
-  { userId: 'me', roleId: 'managing', areas: 'all', measure: 'both', goal: 60000 },
-  { userId: 'marcus', roleId: 'attorney', areas: ['ep', 'gc', 'biz', 'fam'], measure: 'fixed', goal: 25000 },
-  { userId: 'dana', roleId: 'paralegal', areas: 'all' },
-  { userId: 'priya', roleId: 'paralegal', areas: ['fpet', 'ipet'] },
-  { userId: 'lena', roleId: 'bookkeeper', areas: 'all' },
+  { userId: 'me', roleId: 'managing', areas: 'all', measure: 'both', goal: 25000, scorecard: ['fees', 'hires', 'hours', 'onTime'], goals: { hires: 15, hours: 300, onTime: 90 } },
+  { userId: 'marcus', roleId: 'attorney', areas: ['ep', 'gc', 'biz', 'fam'], measure: 'fixed', goal: 4500, manager: 'me', scorecard: ['fees', 'hours', 'billable', 'onTime'], goals: { hours: 320, billable: 85, onTime: 90 } },
+  { userId: 'dana', roleId: 'paralegal', areas: 'all', manager: 'marcus', scorecard: ['tasksDone', 'onTime', 'consults', 'hires'], goals: { tasksDone: 250, onTime: 95, consults: 40, hires: 15 } },
+  { userId: 'priya', roleId: 'paralegal', areas: ['fpet', 'ipet'], manager: 'me', scorecard: ['tasksDone', 'onTime', 'milestones', 'hours'], goals: { tasksDone: 180, onTime: 90, milestones: 40, hours: 350 } },
+  { userId: 'lena', roleId: 'bookkeeper', areas: 'all', manager: 'me', scorecard: ['firmIn', 'invoicesSent', 'tasksDone', 'onTime'], goals: { firmIn: 35000, invoicesSent: 60, onTime: 95 } },
 ];
 
 export const teamName = (id: string) => TEAM.find((t) => t.id === id)?.name ?? OUTSIDE_BALLS.find((b) => b.id === id)?.name ?? (id === 'system' ? 'Docket' : id);

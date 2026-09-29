@@ -12,6 +12,7 @@ import { billedMinutes, DEFAULT_BILLING, type BillingSettings } from './billing'
 import { addDays, addWorkdays, DEFAULT_AREAS, DEFAULT_NUMBERING, nextNumber, type Numbering, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
 export type Screen =
+  | 'home'
   | 'today'
   | 'intake'
   | 'matters'
@@ -25,7 +26,6 @@ export type Screen =
   | 'scheduling'
   | 'tasks'
   | 'trust'
-  | 'performance'
   | 'messages'
   | 'phone'
   | 'portal'
@@ -81,7 +81,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v9';
+const CONFIG_KEY = 'docket.config.v10';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -194,7 +194,7 @@ function maybeDraw(x: State, matterId: string, milestoneId: string, by: string):
 
 function useStoreValue() {
   const [s, setS] = useState<State>(initialState);
-  const [screen, setScreen] = useState<Screen>('today');
+  const [screen, setScreen] = useState<Screen>('home');
   const [matterId, setMatterId] = useState<string>('m1');
   const [pncId, setPncId] = useState<string>('p1');
   const [contactId, setContactId] = useState<string>('c1');

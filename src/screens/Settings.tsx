@@ -5,9 +5,10 @@ import type { Cadences, Role, RoleSide } from '../data';
 import { newId, renderNumber, type DueRule, type Milestone, type PracticeArea, type Stage, type TaskTemplate } from '../practice';
 import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data';
 import * as T from '../trust';
+import * as SC from '../scorecard';
 import { PageHead } from '../ui';
 
-type Section = 'users' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'scorecards' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -482,6 +483,72 @@ function DocsEditor() {
   );
 }
 
+function ScorecardEditor() {
+  const { s, actions } = useStore();
+  const setUser = (u: UserAccess) => actions.setUsers(s.users.map((x) => (x.userId === u.userId ? u : x)));
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <p className="muted small" style={{ margin: 0 }}>
+        Each person’s dashboard shows these numbers, and it’s the first screen they see. The first metric is their headline. Leaders see everyone who reports to them, at any depth, and people with the “Firm performance” permission see the whole firm.
+      </p>
+      <div className="grid cols-2">
+        {s.users.map((u) => {
+          const t = TEAM.find((x) => x.id === u.userId);
+          const card = u.scorecard ?? SC.ROLE_SCORECARD[u.roleId] ?? [];
+          const setCard = (list: string[]) => setUser({ ...u, scorecard: list });
+          const below = SC.orgOf(s.users, u.userId);
+          const available = SC.METRICS.filter((m) => !card.includes(m.id) && (!m.needsMeasure || u.measure));
+          return (
+            <section key={u.userId} className="panel">
+              <div className="panel-head">
+                <h2>{u.userId === 'me' ? 'You' : t?.name} <span className="small muted">· {t?.role}</span></h2>
+                <label className="row small" style={{ gap: 6 }}>
+                  <span className="muted">Reports to</span>
+                  <select className="input small tight" id={`sc-mgr-${u.userId}`} value={u.manager ?? ''} onChange={(e) => setUser({ ...u, manager: e.target.value || undefined })}>
+                    <option value="">Nobody (top)</option>
+                    {s.users.filter((x) => x.userId !== u.userId && !below.includes(x.userId)).map((x) => <option key={x.userId} value={x.userId}>{x.userId === 'me' ? 'You' : TEAM.find((tt) => tt.id === x.userId)?.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <ul className="list">
+                {card.map((id, i) => {
+                  const m = SC.metric(id);
+                  if (!m) return null;
+                  const goal = SC.goalOf(u, id);
+                  const setGoal = (v: number | undefined) => (id === 'fees' ? setUser({ ...u, goal: v, scorecard: card }) : setUser({ ...u, scorecard: card, goals: { ...u.goals, [id]: v as number } }));
+                  return (
+                    <li key={id} className="spread" style={{ gap: 8 }}>
+                      <span className="stack" style={{ gap: 0, minWidth: 0 }}>
+                        <span>{i === 0 && <span className="pill info" style={{ marginRight: 6 }}>Headline</span>}{m.label}</span>
+                        <span className="small muted">{m.help}{m.needsMeasure && !u.measure ? ' · set “Measured on” in Users & permissions' : ''}</span>
+                      </span>
+                      <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                        <span className="small muted">Goal</span>
+                        <input className="input small tight num" style={{ width: 90 }} type="number" min={0} id={`sc-goal-${u.userId}-${id}`} aria-label={`${m.label} goal`} value={goal ?? ''} onChange={(e) => setGoal(e.target.value === '' ? undefined : Number(e.target.value))} />
+                        <span className="small muted" style={{ width: 22 }}>{m.unit === 'pct' ? '%' : m.unit === 'hours' ? 'h' : m.unit === 'money' ? '$' : ''}</span>
+                        <button className="btn sm ghost icon" aria-label="Make headline" title="Make headline" disabled={i === 0} onClick={() => setCard([id, ...card.filter((x) => x !== id)])}>★</button>
+                        <button className="btn sm ghost icon danger" aria-label={`Remove ${m.label}`} onClick={() => setCard(card.filter((x) => x !== id))}>×</button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {available.length > 0 && (
+                <div className="panel-body row" style={{ gap: 6 }}>
+                  <select className="input small tight" id={`sc-add-${u.userId}`} aria-label="Add a metric" value="" onChange={(e) => e.target.value && setCard([...card, e.target.value])}>
+                    <option value="">+ Add a metric…</option>
+                    {available.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function UsersEditor() {
   const { s, actions, notify, access } = useStore();
   const setRole = (r: PermRole) => actions.setPermRoles(s.permRoles.map((x) => (x.id === r.id ? r : x)));
@@ -598,7 +665,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['scorecards', 'Scorecards & goals'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' || k === 'scorecards' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -626,6 +693,7 @@ export default function Settings() {
       )}
 
       {section === 'users' && access.can('users') && <UsersEditor />}
+      {section === 'scorecards' && access.can('users') && <ScorecardEditor />}
       {section === 'numbering' && <NumberingEditor />}
       {section === 'documents' && <DocsEditor />}
       {section === 'trust' && (

@@ -14,13 +14,14 @@ import Calendar from './screens/Calendar';
 import Scheduling from './screens/Scheduling';
 import Tasks, { TaskDrawer } from './screens/Tasks';
 import Trust from './screens/Trust';
-import Performance from './screens/Performance';
+import Dashboard from './screens/Dashboard';
 import Messages from './screens/Messages';
 import Phone from './screens/Phone';
 import Portal from './screens/Portal';
 import Settings from './screens/Settings';
 
 const NAV: { group?: string; id: Screen; label: string }[] = [
+  { id: 'home', label: 'Dashboard' },
   { id: 'today', label: 'Today' },
   { id: 'intake', label: 'PNC matters' },
   { id: 'matters', label: 'Client matters' },
@@ -34,8 +35,7 @@ const NAV: { group?: string; id: Screen; label: string }[] = [
   { group: 'Clients', id: 'scheduling', label: 'Scheduling' },
   { id: 'portal', label: 'Client portal' },
   { id: 'phone', label: 'Phone' },
-  { group: 'Firm', id: 'performance', label: 'Performance' },
-  { id: 'settings', label: 'Settings' },
+  { group: 'Firm', id: 'settings', label: 'Settings' },
 ];
 
 function useTick(active: boolean) {
@@ -116,7 +116,6 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
     case 'contacts': case 'contact': case 'conflicts': return can('contacts');
     case 'time': return can('billingView');
     case 'trust': return can('payments');
-    case 'performance': return can('reports') || can('billingView');
     case 'portal': case 'phone': return can('matters');
     case 'settings': return can('settings') || can('users');
     default: return true;
@@ -142,7 +141,7 @@ export default function App() {
     scheduling: <Scheduling />,
     tasks: <Tasks />,
     trust: <Trust />,
-    performance: <Performance />,
+    home: <Dashboard />,
     messages: <Messages />,
     phone: <Phone />,
     portal: <Portal />,
@@ -177,14 +176,14 @@ export default function App() {
           {access.can('time') && <TimerWidget />}
           <label className="viewas small">
             <span className="muted">Viewing as</span>
-            <select className="input small tight" id="view-as" value={s.viewAs} onChange={(e) => { actions.setViewAs(e.target.value); go('today'); }}>
+            <select className="input small tight" id="view-as" value={s.viewAs} onChange={(e) => { actions.setViewAs(e.target.value); go('home'); }}>
               {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === 'me' ? 'You' : t.name}</option>)}
             </select>
           </label>
         </header>
         {s.viewAs !== 'me' && (
           <div className="viewas-bar">
-            Previewing what <strong>{teamName(s.viewAs)}</strong> ({access.roleName}) can see and do. <button className="link" onClick={() => { actions.setViewAs('me'); go('today'); }}>Back to your view</button>
+            Previewing what <strong>{teamName(s.viewAs)}</strong> ({access.roleName}) can see and do. <button className="link" onClick={() => { actions.setViewAs('me'); go('home'); }}>Back to your view</button>
           </div>
         )}
         <CallBar />
