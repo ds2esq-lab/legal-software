@@ -39,6 +39,8 @@ export interface PracticeArea {
   planTypes: string[];
   planLabel: string; // what this area calls a plan type ("Plan", "Type", "Deed type")
   stageTasks: TaskTemplate[];
+  /** Fixed-price matters: share of the fee earned (and drawn from trust) when each milestone is done. */
+  feeSchedule: { milestoneId: string; percent: number }[];
 }
 
 export const slug = (s: string) =>
@@ -85,6 +87,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    feeSchedule: [{ milestoneId: 'drafts-sent', percent: 50 }, { milestoneId: 'signing', percent: 50 }],
     stageTasks: [
       task('Info Gathering', 'Send questionnaire and document checklist', 'dana', 1, 'workdays', ['Questionnaire link sent', 'Document checklist sent', 'Follow-up set']),
       task('Initial Drafting', 'Draft documents', 'owner', 5),
@@ -115,6 +118,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    feeSchedule: [],
     stageTasks: [
       task('Info Gathering', 'Collect death certificate, will and asset list', 'priya', 5, 'workdays', ['Certified death certificate', 'Original will', 'Asset list', 'Heir contact info']),
       task('Packet Submitted', 'Follow up with clerk on petition', 'priya', 10),
@@ -141,6 +145,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    feeSchedule: [{ milestoneId: 'packet-submitted', percent: 50 }, { milestoneId: 'sea-sent', percent: 50 }],
     stageTasks: [
       task('Info Gathering', 'Collect death certificate, will and asset list', 'priya', 5, 'workdays', ['Certified death certificate', 'Original will', 'Asset list']),
       task('Docs Recorded', 'Send notices to heirs and creditors', 'priya', 3, 'workdays', [], 'court'),
@@ -163,6 +168,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    feeSchedule: [],
     stageTasks: [
       task('Info Gathering', 'Get physician evaluation', 'dana', 10),
       task('Hearing Scheduled', 'Serve notice of hearing', 'dana', 2, 'workdays', [], 'court'),
@@ -187,6 +193,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 3, followUp: 5 },
+    feeSchedule: [{ milestoneId: 'drafted', percent: 50 }, { milestoneId: 'recorded', percent: 50 }],
     stageTasks: [
       task('Info Gathering', 'Pull current vesting deed', 'dana', 2),
       task('Ready to Sign', 'Book signing and notary', 'dana', 2),
@@ -211,6 +218,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    feeSchedule: [{ milestoneId: 'drafts-sent', percent: 50 }, { milestoneId: 'signing', percent: 50 }],
     stageTasks: [
       task('Info Gathering', 'Name availability search', 'marcus', 1),
       task('Send Drafts', 'Send drafts and book review call', 'dana', 1),
@@ -234,6 +242,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    feeSchedule: [{ milestoneId: 'drafts-sent', percent: 50 }, { milestoneId: 'signing', percent: 50 }],
     stageTasks: [
       task('Send Drafts', 'Send drafts to client and opposing counsel', 'dana', 1),
       task('Signing', 'Arrange signing with both parties', 'dana', 3),

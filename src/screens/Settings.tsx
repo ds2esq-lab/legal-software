@@ -4,9 +4,10 @@ import { INCREMENT_OPTIONS, type RoundingMode } from '../billing';
 import type { Cadences, Role, RoleSide } from '../data';
 import { newId, renderNumber, type DueRule, type Milestone, type PracticeArea, type Stage, type TaskTemplate } from '../practice';
 import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data';
+import * as T from '../trust';
 import { PageHead } from '../ui';
 
-type Section = 'users' | 'numbering' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'numbering' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -35,6 +36,37 @@ function AddRow({ placeholder, onAdd, id }: { placeholder: string; onAdd: (v: st
       <input className="input small" style={{ flex: '1 1 180px' }} id={id} aria-label={placeholder} placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />
       <button className="btn sm" type="submit">Add</button>
     </form>
+  );
+}
+
+function FeeScheduleEditor({ area, save }: { area: PracticeArea; save: (patch: Partial<PracticeArea>) => void }) {
+  const total = area.feeSchedule.reduce((n, f) => n + f.percent, 0);
+  const set = (feeSchedule: PracticeArea['feeSchedule']) => save({ feeSchedule });
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Fixed-price earning schedule</h2>
+        <span className="small muted">Fixed-price fees stay in trust until earned. When a milestone below is marked done, that share is queued to move to operating, pending approval.</span>
+      </div>
+      <ul className="list">
+        {area.feeSchedule.length === 0 && <li className="muted small">No schedule. Fixed-price matters in this area are drawn by hand from the matter’s Trust tab.</li>}
+        {area.feeSchedule.map((f, i) => (
+          <li key={i} className="row" style={{ gap: 6 }}>
+            <input className="input small tight num" style={{ width: 70 }} type="number" min={1} max={100} id={`fs-p-${i}`} aria-label="Percent" value={f.percent} onChange={(e) => set(area.feeSchedule.map((x, k) => (k === i ? { ...x, percent: Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : x)))} />
+            <span className="small">% earned when</span>
+            <select className="input small tight" id={`fs-m-${i}`} aria-label="Milestone" value={f.milestoneId} onChange={(e) => set(area.feeSchedule.map((x, k) => (k === i ? { ...x, milestoneId: e.target.value } : x)))}>
+              {area.milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <span className="small">is done</span>
+            <button className="btn sm ghost icon danger" aria-label="Remove" onClick={() => set(area.feeSchedule.filter((_, k) => k !== i))}>×</button>
+          </li>
+        ))}
+      </ul>
+      <div className="panel-body row">
+        <button className="btn sm" onClick={() => set([...area.feeSchedule, { milestoneId: area.milestones[Math.min(1, area.milestones.length - 1)].id, percent: Math.max(0, 100 - total) }])}>+ Add step</button>
+        <span className={`small ${total === 100 || total === 0 ? 'muted' : 'sev-text'}`}>{total === 0 ? '' : total === 100 ? 'Totals 100%' : `Totals ${total}%. Fixed-price schedules normally total 100%.`}</span>
+      </div>
+    </section>
   );
 }
 
@@ -162,6 +194,8 @@ function AreaEditor({ area }: { area: PracticeArea }) {
         </ul>
         <div className="panel-body"><AddRow id="add-stage" placeholder="New stage name" onAdd={(name) => { const stages = [...area.stages]; stages.splice(stages.length - 1, 0, { id: newId('st'), name }); setStages(stages); }} /></div>
       </section>
+
+      <FeeScheduleEditor area={area} save={save} />
 
       <StageTasksEditor area={area} save={save} />
 
@@ -468,7 +502,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : access.can('settings'))).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -497,6 +531,30 @@ export default function Settings() {
 
       {section === 'users' && access.can('users') && <UsersEditor />}
       {section === 'numbering' && <NumberingEditor />}
+      {section === 'trust' && (
+        <div className="grid cols-2">
+          <section className="panel">
+            <div className="panel-head"><h2>Accounts</h2></div>
+            <ul className="list">
+              <li className="spread"><span><strong>{T.TRUST_ACCOUNT.name}</strong><div className="small muted">IOLTA · client funds only · ••{T.TRUST_ACCOUNT.last4}</div></span><span className="pill info">Read-only feed (planned)</span></li>
+              <li className="spread"><span><strong>{T.OPERATING_ACCOUNT.name}</strong><div className="small muted">Earned fees, firm costs, bank and card fees · ••{T.OPERATING_ACCOUNT.last4}</div></span><span className="pill info">Read-only feed (planned)</span></li>
+            </ul>
+            <p className="panel-body small muted">The software records and approves; money moves at M&T. Initiating transfers from software can be added later with two-person approval, if M&T offers it for these accounts.</p>
+          </section>
+          <section className="panel">
+            <div className="panel-head"><h2>Rules applied (Virginia)</h2></div>
+            <ul className="list small">
+              <li>Separate ledger for every client; no ledger can go below zero, counting pending outflows.</li>
+              <li>Money out of trust requires approval by someone with “Record payments & trust”.</li>
+              <li>Fixed-price and advance fees stay in trust until earned (see each practice area’s earning schedule).</li>
+              <li>Monthly reconciliation of bank statement, trust journal and client ledgers; quarterly review of every client balance; both approved and signed by a lawyer.</li>
+              <li>Cash receipts and disbursements journals kept for every transaction.</li>
+              <li>Card processing and bank fees are charged to operating, never to trust.</li>
+            </ul>
+            <p className="panel-body small muted">Confirm each item against the current text of Virginia Rule 1.15 before relying on it.</p>
+          </section>
+        </div>
+      )}
       {section === 'roles' && <RolesEditor />}
       {section === 'intake' && <CadenceEditor />}
 

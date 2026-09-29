@@ -104,6 +104,7 @@ export interface Matter {
   conflicts: ConflictCheck[];
   pncId?: string; // the PNC matter it came from
   restrictedTo?: string[]; // ethical wall: only these users can see the matter
+  retainer?: { target: number; minimum: number }; // hourly matters: evergreen retainer held in trust
 }
 
 export interface TimeEntry {
@@ -140,6 +141,7 @@ export interface Invoice {
   paidAt?: string;
   timeEntryIds: string[];
   flatFeeIds: string[];
+  expenseIds?: string[];
 }
 
 export interface FlatFee {
@@ -585,6 +587,10 @@ const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, pla
 export const matters: Matter[] = [...openMatters, ...formerMatters];
 // Ethical wall example: the contested probate is limited to the two people working it.
 matters.find((m) => m.id === 'm10')!.restrictedTo = ['me', 'priya'];
+// Evergreen retainers on the hourly matters.
+matters.find((m) => m.id === 'm8')!.retainer = { target: 5000, minimum: 1500 };
+matters.find((m) => m.id === 'm14')!.retainer = { target: 4000, minimum: 1000 };
+matters.find((m) => m.id === 'm10')!.retainer = { target: 7500, minimum: 2500 };
 
 // ---------- PNC matters ----------
 
@@ -633,8 +639,9 @@ for (const m of [...openMatters, ...formerMatters]) {
 export const timeEntries: TimeEntry[] = [
   { id: 't1', matterId: 'm8', date: day(-2), actualMinutes: 47, description: 'Review creditor claims; calendar objection deadline', user: 'me', billable: true, invoiced: false, source: 'timer' },
   { id: 't2', matterId: 'm8', date: day(-1), actualMinutes: 13, description: 'Call with personal representative re: inventory values', user: 'me', billable: true, invoiced: false, source: 'call' },
-  { id: 't3', matterId: 'm14', date: day(-1), actualMinutes: 128, description: 'Draft petition and proposed order; prepare hearing notice', user: 'me', billable: true, invoiced: false, source: 'timer' },
-  { id: 't4', matterId: 'm14', date: day(-3), actualMinutes: 54, description: 'Research: least restrictive alternatives', user: 'marcus', billable: true, invoiced: false, source: 'manual' },
+  { id: 't3', matterId: 'm14', date: day(-1), actualMinutes: 208, description: 'Draft petition and proposed order; prepare hearing notice', user: 'me', billable: true, invoiced: true, source: 'timer' },
+  { id: 't4', matterId: 'm14', date: day(-3), actualMinutes: 54, description: 'Research: least restrictive alternatives', user: 'marcus', billable: true, invoiced: true, source: 'manual' },
+  { id: 't9', matterId: 'm14', date: day(0), actualMinutes: 41, description: 'Call with petitioner re: hearing logistics', user: 'me', billable: true, invoiced: false, source: 'call' },
   { id: 't5', matterId: 'm9', date: day(-5), actualMinutes: 4, description: 'Email to clerk re: inventory acceptance', user: 'me', billable: true, invoiced: false, source: 'manual' },
   { id: 't6', matterId: 'm20', date: day(-1), actualMinutes: 38, description: 'Buy-sell provisions (outside fixed-price scope)', user: 'marcus', billable: true, invoiced: false, source: 'manual' },
   { id: 't7', matterId: 'm1', date: day(-4), actualMinutes: 62, description: 'Draft revocable trust and pour-over wills', user: 'me', billable: false, invoiced: false, source: 'timer' },
@@ -642,17 +649,17 @@ export const timeEntries: TimeEntry[] = [
 ];
 
 export const invoices: Invoice[] = [
-  { id: 'inv1', number: 'INV-1042', matterId: 'm1', date: day(-12), lines: [{ description: 'Couples Signature (Trust) Plan', amount: 3950 }], total: 3950, status: 'sent', sentVia: 'portal', sentAt: day(-12), timeEntryIds: [], flatFeeIds: ['f1'] },
+  { id: 'inv4', number: 'INV-1044', matterId: 'm14', date: day(-2), lines: [{ date: day(-3), description: 'Research: least restrictive alternatives', hours: 0.9, rate: 350, amount: 315 }, { date: day(-1), description: 'Draft petition and proposed order; prepare hearing notice', hours: 3.5, rate: 350, amount: 1225 }], total: 1540, status: 'sent', sentVia: 'portal', sentAt: day(-2), timeEntryIds: ['t3', 't4'], flatFeeIds: [] },
   { id: 'inv2', number: 'INV-1038', matterId: 'm12', date: day(-45), lines: [{ description: 'Informal probate administration', amount: 3500 }], total: 3500, status: 'paid', sentVia: 'email', sentAt: day(-45), paidAt: day(-40), timeEntryIds: [], flatFeeIds: ['f4'] },
   { id: 'inv3', number: 'INV-1040', matterId: 'm20', date: day(-15), lines: [{ description: 'LLC formation package', amount: 950 }], total: 950, status: 'paid', sentVia: 'portal', sentAt: day(-15), paidAt: day(-14), timeEntryIds: [], flatFeeIds: ['f3'] },
 ];
 
 export const flatFees: FlatFee[] = [
-  { id: 'f1', matterId: 'm1', description: 'Couples Signature (Trust) Plan', amount: 3950, status: 'invoiced' },
+  { id: 'f1', matterId: 'm1', description: 'Couples Signature (Trust) Plan', amount: 3950, status: 'paid' },
   { id: 'f2', matterId: 'm17', description: 'RTODD deed: prepare, sign, record', amount: 650, status: 'unbilled' },
   { id: 'f3', matterId: 'm20', description: 'LLC formation package', amount: 950, status: 'paid' },
   { id: 'f4', matterId: 'm12', description: 'Informal probate administration', amount: 3500, status: 'paid' },
-  { id: 'f5', matterId: 'm2', description: 'Solo Signature (Trust) Plan', amount: 2950, status: 'unbilled' },
+  { id: 'f5', matterId: 'm2', description: 'Solo Signature (Trust) Plan', amount: 2950, status: 'paid' },
 ];
 
 const tk = (t: Omit<Task, 'snoozes' | 'log' | 'checklist' | 'source' | 'createdAt' | 'done' | 'status'> & Partial<Task>): Task => ({

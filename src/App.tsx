@@ -13,6 +13,7 @@ import TimeBilling from './screens/TimeBilling';
 import Calendar from './screens/Calendar';
 import Scheduling from './screens/Scheduling';
 import Tasks, { TaskDrawer } from './screens/Tasks';
+import Trust from './screens/Trust';
 import Messages from './screens/Messages';
 import Phone from './screens/Phone';
 import Portal from './screens/Portal';
@@ -28,6 +29,7 @@ const NAV: { group?: string; id: Screen; label: string }[] = [
   { id: 'calendar', label: 'Calendar' },
   { id: 'messages', label: 'Messages' },
   { group: 'Money', id: 'time', label: 'Time & billing' },
+  { id: 'trust', label: 'Trust accounting' },
   { group: 'Clients', id: 'scheduling', label: 'Scheduling' },
   { id: 'portal', label: 'Client portal' },
   { id: 'phone', label: 'Phone' },
@@ -111,6 +113,7 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
     case 'matters': case 'matter': return can('matters') || can('billingView');
     case 'contacts': case 'contact': case 'conflicts': return can('contacts');
     case 'time': return can('billingView');
+    case 'trust': return can('payments');
     case 'portal': case 'phone': return can('matters');
     case 'settings': return can('settings') || can('users');
     default: return true;
@@ -119,6 +122,7 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
 
 export default function App() {
   const { screen, go, s, toast, access, actions } = useStore();
+  const trustPending = s.trustTxns.filter((t) => t.status === 'pending').length;
   const overdue = s.tasks.filter((r) => !r.done && r.assignee === access.user && new Date(r.due).getTime() < Date.now()).length;
 
   const view = {
@@ -134,6 +138,7 @@ export default function App() {
     calendar: <Calendar />,
     scheduling: <Scheduling />,
     tasks: <Tasks />,
+    trust: <Trust />,
     messages: <Messages />,
     phone: <Phone />,
     portal: <Portal />,
@@ -154,6 +159,7 @@ export default function App() {
               <button aria-current={screen === n.id || (screen === 'matter' && n.id === 'matters') || (screen === 'pnc' && n.id === 'intake') || (screen === 'contact' && n.id === 'contacts') ? 'page' : undefined} onClick={() => go(n.id)}>
                 <span>{n.label}</span>
                 {n.id === 'tasks' && overdue > 0 && <span className="count">{overdue}</span>}
+                {n.id === 'trust' && trustPending > 0 && <span className="count">{trustPending}</span>}
               </button>
             </div>
           ))}

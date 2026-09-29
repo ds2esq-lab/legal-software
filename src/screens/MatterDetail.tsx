@@ -9,8 +9,10 @@ import Thread from '../Thread';
 import { NotesPanel, PartiesPanel } from '../people';
 import { ConflictBadge, ConflictPanel, uncheckedParties } from '../conflictPanel';
 import { NewTaskForm, TaskRow } from './Tasks';
+import { ExpensesTab, TrustTab } from './MatterMoney';
+import * as T from '../trust';
 
-type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
+type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'trust' | 'expenses' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoiceList({ m }: { m: Matter }) {
   const { s, actions, notify, access } = useStore();
@@ -45,7 +47,11 @@ export function InvoiceList({ m }: { m: Matter }) {
                   </>
                 )}
                 {i.status === 'sent' && canInv && i.sentVia !== 'portal' && <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} also posted to the portal`); }}>Also post to portal</button>}
-                {i.status === 'sent' && canPay && <button className="btn sm" onClick={() => { actions.markInvoicePaid(i.id); notify(`${i.number} marked paid`); }}>Record payment</button>}
+                {i.status === 'sent' && canInv && T.availableOf(m.id, s.trustTxns) >= i.total && !s.trustTxns.some((t) => t.invoiceId === i.id && t.status !== 'rejected') && (
+                  <button className="btn sm primary" onClick={() => { const ok = actions.payInvoiceFromTrust(i.id); notify(ok ? `Payment of ${i.number} from trust requested. It needs approval.` : 'Not enough available in trust'); }}>Pay from trust ({money(T.availableOf(m.id, s.trustTxns))})</button>
+                )}
+                {s.trustTxns.some((t) => t.invoiceId === i.id && t.status === 'pending') && <span className="pill warn">Trust payment awaiting approval</span>}
+                {i.status === 'sent' && canPay && <button className="btn sm" onClick={() => { actions.markInvoicePaid(i.id); notify(`${i.number} marked paid`); }}>Record outside payment</button>}
               </span>
             </div>
             {open === i.id && (
@@ -77,9 +83,11 @@ export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify, access } = useStore();
   const fees = s.flatFees.filter((f) => f.matterId === m.id && f.status === 'unbilled');
   const entries = s.timeEntries.filter((t) => t.matterId === m.id && !t.invoiced && t.billable);
+  const exps = s.expenses.filter((e) => e.matterId === m.id && e.billable && !e.invoiced && e.paidFrom === 'operating');
+  const expTotal = exps.reduce((n, e) => n + T.round(e.amount * (1 + e.markupPct / 100)), 0);
   const hourlyApplies = hourlyRate(m) > 0;
   const hourlyTotal = hourlyApplies ? entries.reduce((n, t) => n + entryValue(t, m, s.billing), 0) : 0;
-  const total = fees.reduce((n, f) => n + f.amount, 0) + hourlyTotal;
+  const total = fees.reduce((n, f) => n + f.amount, 0) + hourlyTotal + expTotal;
 
   return (
     <div className="stack">
@@ -102,7 +110,10 @@ export function InvoicePreview({ m }: { m: Matter }) {
                   <td className="r num">{money(entryValue(t, m, s.billing))}</td>
                 </tr>
               ))}
-            {!fees.length && (!hourlyApplies || !entries.length) && <tr><td colSpan={5} className="muted">Nothing unbilled on this matter.</td></tr>}
+            {exps.map((e) => (
+              <tr key={e.id}><td className="num">{fmtDate(e.date)}</td><td>Expense: {e.description}</td><td className="r muted">—</td><td className="r muted">—</td><td className="r num">{money(T.round(e.amount * (1 + e.markupPct / 100)))}</td></tr>
+            ))}
+            {!fees.length && !exps.length && (!hourlyApplies || !entries.length) && <tr><td colSpan={5} className="muted">Nothing unbilled on this matter.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -499,9 +510,10 @@ export default function MatterDetail() {
       {(closing || m.status === 'closed') && <Closeout m={m} />}
 
       <div className="tabs" role="tablist">
-        {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).filter((t) => (t !== 'time' || access.can('time')) && (t !== 'billing' || access.can('billingView'))).map((t) => (
+        {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'expenses', 'billing', 'trust', 'messages', 'documents'] as Tab[]).filter((t) => (t !== 'time' || access.can('time')) && (t !== 'billing' || access.can('billingView')) && (t !== 'trust' || access.can('billingView')) && (t !== 'expenses' || access.can('time') || access.can('billingView'))).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
+            {t === 'trust' && T.balanceOf(m.id, s.trustTxns) > 0 && <span className="num muted"> {money(T.balanceOf(m.id, s.trustTxns))}</span>}
             {t === 'tasks' && openTasks.length > 0 && <span className="num muted"> {openTasks.length}</span>}
             {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
             {t === 'conflicts' && (m.conflicts.length === 0 || uncheckedParties(m.conflicts, m.parties).length > 0) && <span className="dot-warn" aria-label="needs attention" />}
@@ -519,6 +531,8 @@ export default function MatterDetail() {
           <div style={{ borderTop: '1px solid var(--line)' }}><NewTaskForm matterId={m.id} /></div>
         </section>
       )}
+      {tab === 'trust' && <TrustTab m={m} />}
+      {tab === 'expenses' && <ExpensesTab m={m} />}
       {tab === 'notes' && <NotesPanel target={{ kind: 'matter', id: m.id }} notes={m.notes} />}
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (

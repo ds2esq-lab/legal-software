@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { documents, teamName } from '../data';
 import { money } from '../billing';
+import * as T from '../trust';
 import { fmtDate, fmtTime, PageHead, relDay } from '../ui';
 
 export default function Portal() {
@@ -84,6 +85,23 @@ export default function Portal() {
                   ))}
                 </ul>
               </section>
+              {(() => {
+                const bal = T.balanceOf(m.id, s.trustTxns);
+                const reqs = s.replenishments.filter((r) => r.matterId === m.id && r.status === 'sent');
+                if (bal <= 0 && !reqs.length) return null;
+                return (
+                  <section className="panel">
+                    <div className="panel-head"><h2>Funds held in trust</h2><strong className="num">{money(bal)}</strong></div>
+                    <div className="panel-body small muted">Held for you in our attorney trust account and used only as fees are earned or costs are paid.</div>
+                    {reqs.map((r) => (
+                      <div key={r.id} className="panel-body spread" style={{ borderTop: '1px solid var(--line)' }}>
+                        <span className="small">Please replenish your retainer<div className="num muted">{money(r.amount)} requested {fmtDate(r.date)}</div></span>
+                        <button className="btn sm primary" onClick={() => { actions.payReplenishment(r.id); notify('Paid through LawPay (simulated). Deposited to trust.'); }}>Pay {money(r.amount)}</button>
+                      </div>
+                    ))}
+                  </section>
+                );
+              })()}
               <section className="panel">
                 <div className="panel-head"><h2>Invoices</h2></div>
                 <ul className="list">
@@ -91,7 +109,7 @@ export default function Portal() {
                   {invs.map((i) => (
                     <li key={i.id} className="spread">
                       <span style={{ minWidth: 0 }}>{i.number} · {fmtDate(i.date)}<div className="num small muted">{money(i.total)}</div></span>
-                      {i.status === 'paid' ? <span className="pill ok">Paid</span> : <button className="btn sm primary" onClick={() => { actions.markInvoicePaid(i.id); notify('Paid through LawPay (simulated). Receipt emailed; invoice marked paid.'); }}>Pay {money(i.total)} · card or eCheck</button>}
+                      {i.status === 'paid' ? <span className="pill ok">Paid</span> : s.trustTxns.some((t) => t.invoiceId === i.id && t.status === 'pending') ? <span className="pill info">Being paid from your trust funds</span> : <button className="btn sm primary" onClick={() => { actions.markInvoicePaid(i.id); notify('Paid through LawPay (simulated). Receipt emailed; invoice marked paid.'); }}>Pay {money(i.total)} · card or eCheck</button>}
                     </li>
                   ))}
                 </ul>

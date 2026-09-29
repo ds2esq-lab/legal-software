@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
 import type { Invoice, InvoiceLine, Perm, PermRole, UserAccess } from './data';
+import * as trust from './trust';
+import type { BankTxn, Expense, Reconciliation, Replenishment, TrustTxn } from './trust';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
 import { billedMinutes, DEFAULT_BILLING, type BillingSettings } from './billing';
 import { addDays, addWorkdays, DEFAULT_AREAS, DEFAULT_NUMBERING, nextNumber, type Numbering, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
@@ -18,6 +20,7 @@ export type Screen =
   | 'calendar'
   | 'scheduling'
   | 'tasks'
+  | 'trust'
   | 'messages'
   | 'phone'
   | 'portal'
@@ -47,6 +50,11 @@ interface State {
   users: UserAccess[];
   viewAs: string;
   numbering: Numbering;
+  trustTxns: TrustTxn[];
+  bankTxns: BankTxn[];
+  replenishments: Replenishment[];
+  expenses: Expense[];
+  reconciliations: Reconciliation[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
   invoices: Invoice[];
@@ -61,7 +69,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v4';
+const CONFIG_KEY = 'docket.config.v5';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -74,7 +82,7 @@ function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'r
 function initialState(): State {
   const cfg = loadConfig();
   return {
-    areas: (cfg.areas ?? DEFAULT_AREAS).map((a) => ({ ...a, stageTasks: a.stageTasks ?? [] })),
+    areas: (cfg.areas ?? DEFAULT_AREAS).map((a) => ({ ...a, stageTasks: a.stageTasks ?? [], feeSchedule: a.feeSchedule ?? [] })),
     cadences: cfg.cadences ?? seed.DEFAULT_CADENCES,
     billing: cfg.billing ?? DEFAULT_BILLING,
     matters: seed.matters,
@@ -85,6 +93,11 @@ function initialState(): State {
     users: cfg.users ?? seed.DEFAULT_USERS,
     viewAs: 'me',
     numbering: cfg.numbering ?? DEFAULT_NUMBERING,
+    trustTxns: trust.trustTxns,
+    bankTxns: trust.bankTxns,
+    replenishments: trust.replenishments,
+    expenses: trust.expenses,
+    reconciliations: trust.reconciliations,
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
     invoices: seed.invoices,
@@ -126,6 +139,38 @@ function stageTasksFor(m: Matter, area: PracticeArea, stageId: string, existing:
         createdAt: new Date().toISOString(),
       };
     });
+}
+
+/** Outflow request, refused if it would take the client below zero (counting pending outflows). */
+function requestOut(x: State, t: Omit<TrustTxn, 'id' | 'status' | 'date'> & { date?: string }): { x: State; ok: boolean } {
+  if (t.amount <= 0 || t.amount > trust.availableOf(t.matterId, x.trustTxns) + 0.001) return { x, ok: false };
+  const txn: TrustTxn = { ...t, id: newId('tt'), date: t.date ?? todayISO(), status: 'pending' };
+  return { x: { ...x, trustTxns: [...x.trustTxns, txn] }, ok: true };
+}
+
+/** After money leaves trust on an evergreen retainer, ask the client to top it back up. */
+function maybeReplenish(x: State, matterId: string): State {
+  const m = x.matters.find((q) => q.id === matterId);
+  if (!m?.retainer) return x;
+  const bal = trust.balanceOf(matterId, x.trustTxns);
+  if (bal >= m.retainer.minimum || x.replenishments.some((r) => r.matterId === matterId && r.status === 'sent')) return x;
+  const req: Replenishment = { id: newId('rp'), matterId, date: todayISO(), amount: trust.round(m.retainer.target - bal), status: 'sent' };
+  return { ...x, replenishments: [...x.replenishments, req] };
+}
+
+/** Fixed-price matter: a milestone that earns part of the fee queues a draw for approval. */
+function maybeDraw(x: State, matterId: string, milestoneId: string, by: string): State {
+  const m = x.matters.find((q) => q.id === matterId);
+  const area = m && x.areas.find((a) => a.id === m.areaId);
+  if (!m || !area || m.billing.kind === 'hourly') return x;
+  const rule = area.feeSchedule.find((f) => f.milestoneId === milestoneId);
+  if (!rule) return x;
+  if (x.trustTxns.some((t) => t.matterId === matterId && t.milestoneId === milestoneId && t.status !== 'rejected')) return x;
+  const fee = m.billing.amount;
+  const amount = Math.min(trust.round((fee * rule.percent) / 100), trust.availableOf(matterId, x.trustTxns));
+  if (amount <= 0) return x;
+  const msName = area.milestones.find((q) => q.id === milestoneId)?.name ?? milestoneId;
+  return requestOut(x, { matterId, kind: 'draw', amount, memo: `Earned ${rule.percent}% on ${msName}`, method: 'transfer', requestedBy: by, milestoneId }).x;
 }
 
 function useStoreValue() {
@@ -179,6 +224,7 @@ function useStoreValue() {
         });
       },
       setMilestone(id: string, milestoneId: string, patch: Partial<MilestoneState>) {
+        if (patch.done) setS((x) => maybeDraw(x, id, milestoneId, x.viewAs));
         patchMatter(id, (m) => {
           const cur: MilestoneState = { ...m.milestones[milestoneId], ...patch };
           if (!cur.done) delete cur.done;
@@ -287,6 +333,7 @@ function useStoreValue() {
           ],
           cadence: { soon: 10, followUp: 14 },
           stageTasks: [],
+          feeSchedule: [],
         };
         setS((x) => ({ ...x, areas: [...x.areas, area] }));
         return id;
@@ -403,8 +450,10 @@ function useStoreValue() {
           const rate = m.billing.kind === 'flat' ? 0 : m.billing.rate;
           const fees = x.flatFees.filter((f) => f.matterId === matterId && f.status === 'unbilled');
           const entries = rate ? x.timeEntries.filter((t) => t.matterId === matterId && !t.invoiced && t.billable) : [];
+          const exps = x.expenses.filter((e) => e.matterId === matterId && e.billable && !e.invoiced && e.paidFrom === 'operating');
           const lines: InvoiceLine[] = [
             ...fees.map((f) => ({ description: f.description, amount: f.amount })),
+            ...exps.map((e) => ({ date: e.date, description: `Expense: ${e.description}`, amount: trust.round(e.amount * (1 + e.markupPct / 100)) })),
             ...entries.map((t) => {
               const hours = billedMinutes(t.actualMinutes, x.billing) / 60;
               return { date: t.date, description: t.description, hours, rate, amount: Math.round(hours * rate * 100) / 100 };
@@ -424,12 +473,14 @@ function useStoreValue() {
             sentAt: sendVia ? todayISO() : undefined,
             timeEntryIds: entries.map((t) => t.id),
             flatFeeIds: fees.map((f) => f.id),
+            expenseIds: exps.map((e) => e.id),
           };
           return {
             ...x,
             invoices: [inv, ...x.invoices],
             timeEntries: x.timeEntries.map((t) => (inv.timeEntryIds.includes(t.id) ? { ...t, invoiced: true } : t)),
             flatFees: x.flatFees.map((f) => (inv.flatFeeIds.includes(f.id) ? { ...f, status: 'invoiced' } : f)),
+            expenses: x.expenses.map((e) => (inv.expenseIds?.includes(e.id) ? { ...e, invoiced: true } : e)),
           };
         });
         return id;
@@ -458,6 +509,7 @@ function useStoreValue() {
             invoices: x.invoices.filter((i) => i.id !== id),
             timeEntries: x.timeEntries.map((t) => (inv.timeEntryIds.includes(t.id) ? { ...t, invoiced: false } : t)),
             flatFees: x.flatFees.map((f) => (inv.flatFeeIds.includes(f.id) ? { ...f, status: 'unbilled' } : f)),
+            expenses: x.expenses.map((e) => (inv.expenseIds?.includes(e.id) ? { ...e, invoiced: false } : e)),
           };
         });
       },
@@ -526,6 +578,113 @@ function useStoreValue() {
       },
       addTask(t: Omit<Task, 'id' | 'done' | 'status' | 'snoozes' | 'log' | 'source' | 'createdAt'>) {
         setS((x) => ({ ...x, tasks: [...x.tasks, { ...t, id: newId('task'), done: false, status: 'todo', snoozes: 0, log: ['Created'], source: 'manual', createdAt: new Date().toISOString() }] }));
+      },
+
+      // ----- Trust accounting -----
+      recordDeposit(matterId: string, amount: number, memo: string, method: TrustTxn['method'], payee?: string) {
+        setS((x) => {
+          const txn: TrustTxn = { id: newId('tt'), date: todayISO(), matterId, kind: 'deposit', amount: trust.round(amount), memo, method, payee, status: 'approved', requestedBy: x.viewAs, approvedBy: x.viewAs };
+          return { ...x, trustTxns: [...x.trustTxns, txn] };
+        });
+      },
+      /** Returns false if the client's available trust balance can't cover it. */
+      requestTrustOut(t: Omit<TrustTxn, 'id' | 'status' | 'date' | 'requestedBy'>): boolean {
+        let ok = false;
+        setS((x) => {
+          const r = requestOut(x, { ...t, requestedBy: x.viewAs });
+          ok = r.ok;
+          return r.x;
+        });
+        return ok;
+      },
+      approveTrust(id: string) {
+        setS((x) => {
+          const t = x.trustTxns.find((q) => q.id === id);
+          if (!t || t.status !== 'pending') return x;
+          let next: State = { ...x, trustTxns: x.trustTxns.map((q) => (q.id === id ? { ...q, status: 'approved', approvedBy: x.viewAs, date: todayISO() } : q)) };
+          if (t.invoiceId) next = { ...next, invoices: next.invoices.map((i) => (i.id === t.invoiceId ? { ...i, status: 'paid', paidAt: todayISO() } : i)) };
+          return maybeReplenish(next, t.matterId);
+        });
+      },
+      rejectTrust(id: string) {
+        setS((x) => ({ ...x, trustTxns: x.trustTxns.map((q) => (q.id === id ? { ...q, status: 'rejected' } : q)) }));
+      },
+      payInvoiceFromTrust(invoiceId: string): boolean {
+        let ok = false;
+        setS((x) => {
+          const inv = x.invoices.find((i) => i.id === invoiceId);
+          if (!inv || x.trustTxns.some((t) => t.invoiceId === invoiceId && t.status !== 'rejected')) return x;
+          const r = requestOut(x, { matterId: inv.matterId, kind: 'draw', amount: inv.total, memo: `Payment of ${inv.number}`, method: 'transfer', requestedBy: x.viewAs, invoiceId });
+          ok = r.ok;
+          return r.x;
+        });
+        return ok;
+      },
+      /** Simulates the next M&T sync: approved items not yet at the bank post there, then everything auto-matches. */
+      syncBank() {
+        setS((x) => {
+          const posted: BankTxn[] = x.trustTxns
+            .filter((t) => t.status === 'approved' && !t.bankTxnId && !(t.kind !== 'deposit' && t.method === 'check' && t.date >= addDays(todayISO(), -3)))
+            .map((t) => ({ id: newId('bk'), date: todayISO(), amount: trust.sign(t), matchedId: t.id, description: t.kind === 'deposit' ? `DEPOSIT ${t.ref ?? ''}` : t.kind === 'draw' ? 'ONLINE TRANSFER TO XXXXXX1177' : `CHECK ${(t.ref ?? '').replace(/\D/g, '')}` }));
+          // Lines posted by this sync are already linked to the entry that caused them; older unmatched lines try an automatic match.
+          const bank = [...x.bankTxns, ...posted];
+          const linked = x.trustTxns.map((t) => { const b = posted.find((q) => q.matchedId === t.id); return b ? { ...t, bankTxnId: b.id } : t; });
+          const pairs = trust.autoMatch(linked, bank);
+          return {
+            ...x,
+            bankTxns: bank.map((b) => { const p = pairs.find(([bid]) => bid === b.id); return p ? { ...b, matchedId: p[1] } : b; }),
+            trustTxns: linked.map((t) => { const p = pairs.find(([, tid]) => tid === t.id); return p ? { ...t, bankTxnId: p[0] } : t; }),
+          };
+        });
+      },
+      matchBank(bankId: string, txnId: string) {
+        setS((x) => ({
+          ...x,
+          bankTxns: x.bankTxns.map((b) => (b.id === bankId ? { ...b, matchedId: txnId } : b)),
+          trustTxns: x.trustTxns.map((t) => (t.id === txnId ? { ...t, bankTxnId: bankId } : t)),
+        }));
+      },
+      /** A bank charge taken from IOLTA: the firm reimburses it from operating, recorded as a firm deposit. */
+      reimburseBankFee(bankId: string) {
+        setS((x) => {
+          const b = x.bankTxns.find((q) => q.id === bankId);
+          if (!b) return x;
+          const out: BankTxn = { ...b, matchedId: 'firm' };
+          const back: BankTxn = { id: newId('bk'), date: todayISO(), amount: -b.amount, description: 'ONLINE TRANSFER FROM XXXXXX1177', matchedId: 'firm' };
+          return { ...x, bankTxns: [...x.bankTxns.map((q) => (q.id === bankId ? out : q)), back] };
+        });
+      },
+      setRetainer(matterId: string, retainer: Matter['retainer']) {
+        setS((x) => ({ ...x, matters: x.matters.map((m) => (m.id === matterId ? { ...m, retainer } : m)) }));
+      },
+      requestReplenishment(matterId: string, amount: number) {
+        setS((x) => ({ ...x, replenishments: [...x.replenishments.filter((r) => !(r.matterId === matterId && r.status === 'sent')), { id: newId('rp'), matterId, date: todayISO(), amount: trust.round(amount), status: 'sent' }] }));
+      },
+      /** Client pays a replenishment request (LawPay, simulated): money lands in trust. */
+      payReplenishment(id: string) {
+        setS((x) => {
+          const r = x.replenishments.find((q) => q.id === id);
+          if (!r || r.status !== 'sent') return x;
+          const txn: TrustTxn = { id: newId('tt'), date: todayISO(), matterId: r.matterId, kind: 'deposit', amount: r.amount, memo: 'Retainer replenishment', method: 'lawpay', ref: `LP-${Math.floor(Math.random() * 90000 + 10000)}`, status: 'approved', requestedBy: 'client', approvedBy: 'client' };
+          return { ...x, trustTxns: [...x.trustTxns, txn], replenishments: x.replenishments.map((q) => (q.id === id ? { ...q, status: 'paid', paidAt: todayISO() } : q)) };
+        });
+      },
+      addExpense(e: Omit<Expense, 'id' | 'invoiced' | 'trustTxnId'>): boolean {
+        let ok = true;
+        setS((x) => {
+          const id = newId('ex');
+          if (e.paidFrom === 'trust') {
+            const r = requestOut(x, { matterId: e.matterId, kind: 'disbursement', amount: e.amount, memo: e.description, payee: e.category === 'Filing fee' || e.category === 'Recording fee' ? 'Clerk of Circuit Court' : e.category, method: 'check', requestedBy: x.viewAs, expenseId: id });
+            if (!r.ok) { ok = false; return x; }
+            const txnId = r.x.trustTxns[r.x.trustTxns.length - 1].id;
+            return { ...r.x, expenses: [...r.x.expenses, { ...e, id, invoiced: false, trustTxnId: txnId }] };
+          }
+          return { ...x, expenses: [...x.expenses, { ...e, id, invoiced: false }] };
+        });
+        return ok;
+      },
+      signReconciliation(rec: Omit<Reconciliation, 'id' | 'signedAt' | 'signedBy'>) {
+        setS((x) => ({ ...x, reconciliations: [{ ...rec, id: newId('rc'), signedAt: todayISO(), signedBy: x.viewAs }, ...x.reconciliations.filter((r) => !(r.kind === rec.kind && r.period === rec.period))] }));
       },
 
       // ----- Messages -----

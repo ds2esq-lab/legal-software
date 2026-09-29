@@ -16,7 +16,8 @@ export default function TimeBilling() {
       const mins = entries.filter((t) => t.billable).reduce((a, t) => a + billedMinutes(t.actualMinutes, s.billing), 0);
       const hourly = entries.reduce((a, t) => a + entryValue(t, m, s.billing), 0);
       const flat = s.flatFees.filter((f) => f.matterId === m.id && f.status === 'unbilled').reduce((a, f) => a + f.amount, 0);
-      return { m, mins, hourly, flat, total: hourly + flat };
+      const exp = s.expenses.filter((e) => e.matterId === m.id && e.billable && !e.invoiced && e.paidFrom === 'operating').reduce((a, e) => a + e.amount * (1 + e.markupPct / 100), 0);
+      return { m, mins, hourly, flat: flat + exp, total: hourly + flat + exp };
     })
     .filter((r) => r.total > 0 || r.mins > 0)
     .sort((a, b) => b.total - a.total);
@@ -45,7 +46,7 @@ export default function TimeBilling() {
           <div className="table-wrap">
             <table className="t">
               <thead>
-                <tr><th>Matter</th><th>Fee type</th><th className="r">Hours</th><th className="r">Hourly</th><th className="r">Fixed price</th><th className="r">Total</th><th /></tr>
+                <tr><th>Matter</th><th>Fee type</th><th className="r">Hours</th><th className="r">Hourly</th><th className="r">Fixed price & costs</th><th className="r">Total</th><th /></tr>
               </thead>
               <tbody>
                 {rows.map(({ m, mins, hourly, flat, total }) => (

@@ -22,6 +22,10 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Phone | Simulated VoIP: caller matched to matter, calls turned into time entries |
 | Client portal | What the client sees: status, messages, shared documents, invoices |
 
+## Trust accounting (IOLTA)
+
+A ledger per client that can never go negative; money out of trust needs approval; fixed-price fees stay in trust and are drawn when the milestones in each practice area's earning schedule are done; hourly invoices can be paid from trust; evergreen retainers send replenishment requests automatically; expenses are billed when the firm advances them or paid from trust. A read-only bank feed (simulated M&T) is matched line by line, and the monthly three-way reconciliation and quarterly client-ledger review follow Virginia Rule 1.15(d). The software records and approves; money moves at the bank.
+
 ## Permissions
 
 Roles (editable) grant permissions such as intake, Client matters, billing, invoices, payments and settings. Each person also gets the practice areas they can see, and any matter can be restricted to named people (an ethical wall). Conflict checks still search walled matters but show them only as "Restricted matter". Use **Viewing as** in the top bar to preview anyone's view.
