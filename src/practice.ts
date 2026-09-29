@@ -32,6 +32,7 @@ export interface TaskTemplate {
 export interface PracticeArea {
   id: string;
   name: string;
+  code?: string; // short code for matter numbers, e.g. EP
   stages: Stage[]; // last stage is treated as "closed"
   milestones: Milestone[];
   cadence: { soon: number; followUp: number }; // days since last contact
@@ -63,6 +64,7 @@ const task = (stage: string, title: string, assignTo: string, dueIn: number, due
 export const DEFAULT_AREAS: PracticeArea[] = [
   {
     id: 'ep',
+    code: 'EP',
     name: 'Estate Planning',
     planLabel: 'Plan',
     planTypes: [
@@ -95,6 +97,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'fpet',
+    code: 'FP',
     name: 'Formal PET',
     planLabel: 'Type',
     planTypes: ['Formal Probate', 'Trust Administration', 'Conservatorship'],
@@ -123,6 +126,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'ipet',
+    code: 'IP',
     name: 'Informal PET',
     planLabel: 'Type',
     planTypes: ['Informal Probate', 'Small Estate'],
@@ -144,6 +148,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'gc',
+    code: 'GC',
     name: 'Guardianship / Conservatorship',
     planLabel: 'Type',
     planTypes: ['Guardianship', 'Conservatorship', 'Both', 'Guardianship of Minor Estate', 'GAL'],
@@ -167,6 +172,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'deed',
+    code: 'DE',
     name: 'Deeds',
     planLabel: 'Deed type',
     planTypes: ['Gift', 'RTODD', 'Distribution', 'QCD'],
@@ -190,6 +196,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'biz',
+    code: 'BZ',
     name: 'Business',
     planLabel: 'Work',
     planTypes: ['LLC Organization', 'LLC Operating Agreement', 'Corporate Docs', 'Other'],
@@ -212,6 +219,7 @@ export const DEFAULT_AREAS: PracticeArea[] = [
   },
   {
     id: 'fam',
+    code: 'FL',
     name: 'Family Law',
     planLabel: 'Work',
     planTypes: ['Premarital', 'Postmarital', 'Divorce by Affidavit'],
@@ -307,3 +315,36 @@ export const CONTACT_LABEL: Record<ContactState, string> = {
   followup: 'Follow-up needed',
   none: 'Never contacted',
 };
+
+// ---------- Matter numbering ----------
+
+export interface Numbering {
+  format: string; // tokens: {YYYY} {YY} {AREA} {CLIENT} {SEQ}
+  digits: number; // zero-padding for {SEQ}
+  scope: 'firm' | 'year' | 'area' | 'area-year'; // what the sequence counts within
+  start: number;
+  counters: Record<string, number>; // last number used per scope key
+}
+
+export const DEFAULT_NUMBERING: Numbering = { format: '{YYYY}-{SEQ}', digits: 4, scope: 'year', start: 101, counters: {} };
+
+function scopeKey(n: Numbering, areaId: string, year: string) {
+  return n.scope === 'firm' ? 'firm' : n.scope === 'year' ? year : n.scope === 'area' ? areaId : `${areaId}-${year}`;
+}
+
+export function renderNumber(n: Numbering, seq: number, area: PracticeArea | undefined, clientLast: string, date = todayISO()) {
+  return n.format
+    .replace(/\{YYYY\}/g, date.slice(0, 4))
+    .replace(/\{YY\}/g, date.slice(2, 4))
+    .replace(/\{AREA\}/g, area?.code || (area?.name ?? 'GEN').slice(0, 3).toUpperCase())
+    .replace(/\{CLIENT\}/g, clientLast.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10))
+    .replace(/\{SEQ\}/g, String(seq).padStart(n.digits, '0'));
+}
+
+/** Next number for a new matter, and the counters to save. `existingMax` seeds a scope that has no counter yet. */
+export function nextNumber(n: Numbering, area: PracticeArea | undefined, clientLast: string, existingMax = 0) {
+  const date = todayISO();
+  const key = scopeKey(n, area?.id ?? 'x', date.slice(0, 4));
+  const seq = Math.max(n.counters[key] ?? 0, existingMax, n.start - 1) + 1;
+  return { number: renderNumber(n, seq, area, clientLast, date), counters: { ...n.counters, [key]: seq } };
+}

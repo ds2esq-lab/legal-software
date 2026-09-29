@@ -22,12 +22,12 @@ function NextDue({ m }: { m: Matter }) {
 }
 
 function FormerMatters() {
-  const { s, lookup, go, actions, notify } = useStore();
+  const { s, lookup, go, actions, notify, access } = useStore();
   const [q, setQ] = useState('');
   const [areaId, setAreaId] = useState('all');
   const term = q.trim().toLowerCase();
   const rows = s.matters
-    .filter((m) => m.status === 'closed')
+    .filter((m) => m.status === 'closed' && access.canSee(m))
     .filter((m) => areaId === 'all' || m.areaId === areaId)
     .filter((m) => !term || m.name.toLowerCase().includes(term) || m.parties.some((p) => lookup.contact(p.contactId)?.name.toLowerCase().includes(term)) || m.number.includes(term))
     .sort((a, b) => (b.closedOn ?? '').localeCompare(a.closedOn ?? ''));
@@ -68,9 +68,9 @@ function FormerMatters() {
 }
 
 export default function Matters() {
-  const { s, actions, lookup, go, notify } = useStore();
+  const { s, actions, lookup, go, notify, access } = useStore();
   const [scope, setScope] = useState<'open' | 'former'>('open');
-  const [areaId, setAreaId] = useState<string>('ep');
+  const [areaId, setAreaId] = useState<string>(() => (access.areaOk('ep') ? 'ep' : 'all'));
   const [view, setView] = useState<View>('board');
   const [ball, setBall] = useState('all');
   const [showStalled, setShowStalled] = useState(true);
@@ -78,7 +78,7 @@ export default function Matters() {
   const [overCol, setOverCol] = useState<string | null>(null);
 
   const area = areaId === 'all' ? undefined : lookup.area(areaId);
-  const open = s.matters.filter((m) => m.status === 'open');
+  const open = s.matters.filter((m) => m.status === 'open' && access.canSee(m));
   const list = open
     .filter((m) => areaId === 'all' || m.areaId === areaId)
     .filter((m) => ball === 'all' || m.ball === ball)
@@ -121,6 +121,7 @@ export default function Matters() {
                   <div className="small muted">
                     {m.planType ?? a.name} · <span className="num">{m.number}</span>
                     {m.stalled && <span className="pill warn" style={{ marginLeft: 6 }}>Stalled</span>}
+                    {m.restrictedTo?.length ? <span className="pill lock" style={{ marginLeft: 6 }} title="Restricted matter">🔒 Restricted</span> : null}
                   </div>
                   <div className="small" style={{ marginTop: 2 }}>
                     <ConflictBadge checks={m.conflicts} parties={m.parties} />
@@ -160,7 +161,7 @@ export default function Matters() {
       <PageHead title="Client matters" sub="Open matters by practice area, and every former client. Each practice area has its own stages, milestones and contact timer.">
         <div className="seg" role="group" aria-label="Open or former">
           <button aria-pressed={scope === 'open'} onClick={() => setScope('open')}>Open <span className="num">{open.length}</span></button>
-          <button aria-pressed={scope === 'former'} onClick={() => setScope('former')}>Former clients <span className="num">{s.matters.length - open.length}</span></button>
+          <button aria-pressed={scope === 'former'} onClick={() => setScope('former')}>Former clients <span className="num">{s.matters.filter((m) => m.status === 'closed' && access.canSee(m)).length}</span></button>
         </div>
         {scope === 'open' && <>
         <select className="input" style={{ width: 'auto' }} id="ball-filter" aria-label="Filter by whose ball" value={ball} onChange={(e) => setBall(e.target.value)}>
@@ -183,7 +184,7 @@ export default function Matters() {
         <button role="tab" aria-selected={areaId === 'all'} onClick={() => setAreaId('all')}>
           All <span className="num muted">{open.length}</span>
         </button>
-        {s.areas.map((a) => (
+        {s.areas.filter((a) => access.can('billingView') || access.areaOk(a.id)).map((a) => (
           <button key={a.id} role="tab" aria-selected={areaId === a.id} onClick={() => setAreaId(a.id)}>
             {a.name} <span className="num muted">{open.filter((m) => m.areaId === a.id).length}</span>
           </button>

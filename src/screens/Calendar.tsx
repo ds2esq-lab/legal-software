@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { daysFromToday, fmtTime, PageHead, startOfToday } from '../ui';
 
 export default function Calendar() {
-  const { s, lookup, go, openTask } = useStore();
+  const { s, lookup, go, openTask, access } = useStore();
   const [offset, setOffset] = useState(0);
   const start = startOfToday();
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * 7); // Monday
@@ -56,8 +56,8 @@ export default function Calendar() {
                     onClick={() => e.matterId && go('matter', e.matterId)}
                   >
                     <strong className="num">{fmtTime(e.start)}</strong>
-                    <div>{e.title}</div>
-                    {e.matterId && <div className="muted">{lookup.matter(e.matterId)?.name}</div>}
+                    <div>{e.matterId && lookup.matter(e.matterId) && !access.canSee(lookup.matter(e.matterId)!) ? 'Busy' : e.title}</div>
+                    {e.matterId && <div className="muted">{(() => { const m = lookup.matter(e.matterId); return m && access.canSee(m) ? m.name : 'Restricted matter'; })()}</div>}
                   </button>
                 ))}
               </div>

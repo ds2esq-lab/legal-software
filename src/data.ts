@@ -103,6 +103,7 @@ export interface Matter {
   notes: Note[];
   conflicts: ConflictCheck[];
   pncId?: string; // the PNC matter it came from
+  restrictedTo?: string[]; // ethical wall: only these users can see the matter
 }
 
 export interface TimeEntry {
@@ -311,6 +312,47 @@ export const TEAM = [
   { id: 'dana', name: 'Dana Ruiz', initials: 'DR', role: 'Paralegal', rate: 150 },
   { id: 'marcus', name: 'Marcus Lee', initials: 'ML', role: 'Associate', rate: 250 },
   { id: 'priya', name: 'Priya Shah', initials: 'PS', role: 'Probate Paralegal', rate: 150 },
+  { id: 'lena', name: 'Lena Park', initials: 'LP', role: 'Bookkeeper', rate: 0 },
+];
+
+// ---------- Permissions ----------
+
+export type Perm = 'intake' | 'matters' | 'contacts' | 'time' | 'billingView' | 'invoices' | 'payments' | 'settings' | 'users';
+export const PERMS: { id: Perm; label: string; help: string }[] = [
+  { id: 'intake', label: 'PNC matters & intake', help: 'See and work prospects, run conflict checks on them' },
+  { id: 'matters', label: 'Client matters', help: 'Only in the practice areas the person is given below' },
+  { id: 'contacts', label: 'Contacts & conflict check', help: 'Search everyone; restricted matters stay hidden' },
+  { id: 'time', label: 'Record time', help: 'Timer and time entries on matters they can see' },
+  { id: 'billingView', label: 'See billing', help: 'Rates, unbilled work, invoices' },
+  { id: 'invoices', label: 'Create & send invoices', help: 'Drafts, sending, deleting drafts' },
+  { id: 'payments', label: 'Record payments & trust', help: 'Payments, trust transfers, reconciliation' },
+  { id: 'settings', label: 'Firm settings', help: 'Practice areas, stages, deadlines, cadences' },
+  { id: 'users', label: 'Users & permissions', help: 'This screen' },
+];
+export interface PermRole {
+  id: string;
+  name: string;
+  perms: Record<Perm, boolean>;
+}
+const all = (v: boolean) => Object.fromEntries(PERMS.map((p) => [p.id, v])) as Record<Perm, boolean>;
+export const DEFAULT_PERM_ROLES: PermRole[] = [
+  { id: 'managing', name: 'Managing Attorney', perms: all(true) },
+  { id: 'attorney', name: 'Attorney', perms: { ...all(false), intake: true, matters: true, contacts: true, time: true, billingView: true, invoices: true } },
+  { id: 'paralegal', name: 'Paralegal', perms: { ...all(false), intake: true, matters: true, contacts: true, time: true } },
+  { id: 'intake', name: 'Intake Specialist', perms: { ...all(false), intake: true, contacts: true } },
+  { id: 'bookkeeper', name: 'Bookkeeper', perms: { ...all(false), contacts: true, billingView: true, invoices: true, payments: true } },
+];
+export interface UserAccess {
+  userId: string;
+  roleId: string;
+  areas: 'all' | string[]; // practice areas they can see Client matters in
+}
+export const DEFAULT_USERS: UserAccess[] = [
+  { userId: 'me', roleId: 'managing', areas: 'all' },
+  { userId: 'marcus', roleId: 'attorney', areas: ['ep', 'gc', 'biz', 'fam'] },
+  { userId: 'dana', roleId: 'paralegal', areas: 'all' },
+  { userId: 'priya', roleId: 'paralegal', areas: ['fpet', 'ipet'] },
+  { userId: 'lena', roleId: 'bookkeeper', areas: 'all' },
 ];
 
 export const teamName = (id: string) => TEAM.find((t) => t.id === id)?.name ?? OUTSIDE_BALLS.find((b) => b.id === id)?.name ?? (id === 'system' ? 'Docket' : id);
@@ -541,6 +583,8 @@ const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, pla
 });
 
 export const matters: Matter[] = [...openMatters, ...formerMatters];
+// Ethical wall example: the contested probate is limited to the two people working it.
+matters.find((m) => m.id === 'm10')!.restrictedTo = ['me', 'priya'];
 
 // ---------- PNC matters ----------
 

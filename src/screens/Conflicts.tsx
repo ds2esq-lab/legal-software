@@ -29,12 +29,13 @@ export function HitList({ hits }: { hits: Hit[] }) {
                 <div className="row" style={{ gap: 6 }}>
                   {h.links.map((l) => (
                     <button
+                      disabled={l.restricted}
                       key={l.kind + l.id}
                       className={`pill link-pill ${l.role.side === 'adverse' ? 'danger' : l.role.side === 'client' ? 'info' : ''}`}
                       onClick={() => go(l.kind === 'pnc' ? 'pnc' : 'matter', l.id)}
-                      title={`Open ${l.title}`}
+                      title={l.restricted ? 'Behind an ethical wall. Ask the responsible attorney.' : `Open ${l.title}`}
                     >
-                      {l.role.name} · {l.title} · {l.kind === 'pnc' ? 'PNC' : l.kind === 'open' ? 'Open matter' : `Former, closed ${l.date ? fmtDate(l.date) + ' ' + l.date.slice(0, 4) : ''}`}
+                      {l.restricted ? '🔒 ' : ''}{l.role.name} · {l.title} · {l.kind === 'pnc' ? 'PNC' : l.kind === 'open' ? 'Open matter' : `Former, closed ${l.date ? fmtDate(l.date) + ' ' + l.date.slice(0, 4) : ''}`}
                     </button>
                   ))}
                 </div>

@@ -7,14 +7,14 @@ import { fmtDate, PageHead, StagePill } from '../ui';
 type Filter = 'all' | 'clients' | 'former' | 'pnc' | 'adverse';
 
 function useLinks() {
-  const { s, lookup } = useStore();
+  const { s, lookup, access } = useStore();
   return (c: Contact) => {
     const out: { kind: 'pnc' | 'open' | 'former'; id: string; title: string; role: string; side: string; status: string; date?: string }[] = [];
     for (const m of s.matters)
       for (const p of m.parties)
         if (p.contactId === c.id) {
           const r = lookup.role(p.role);
-          out.push({ kind: m.status === 'open' ? 'open' : 'former', id: m.id, title: m.name, role: r.name, side: r.side, status: m.status === 'open' ? lookup.areaOf(m).name : `Closed ${m.closedOn ? fmtDate(m.closedOn) + ', ' + m.closedOn.slice(0, 4) : ''}`, date: m.closedOn ?? m.opened });
+          out.push({ kind: m.status === 'open' ? 'open' : 'former', id: m.id, title: access.canSee(m) ? m.name : access.walledOff(m) ? '🔒 Restricted matter' : 'Matter in another practice area', role: r.name, side: r.side, status: m.status === 'open' ? lookup.areaOf(m).name : `Closed ${m.closedOn ? fmtDate(m.closedOn) + ', ' + m.closedOn.slice(0, 4) : ''}`, date: m.closedOn ?? m.opened });
         }
     for (const q of s.pncs)
       for (const p of q.parties)
@@ -57,7 +57,7 @@ export function ContactDetail() {
                   return (
                     <li key={l.kind + l.id} className="spread">
                       <span>
-                        <button className="link" onClick={() => go(l.kind === 'pnc' ? 'pnc' : 'matter', l.id)}>{l.title}</button>
+                        {l.title.startsWith('🔒') || l.title.startsWith('Matter in another') ? <span className="muted">{l.title}</span> : <button className="link" onClick={() => go(l.kind === 'pnc' ? 'pnc' : 'matter', l.id)}>{l.title}</button>}
                         <div className="small muted">{l.status}</div>
                       </span>
                       <span className="row" style={{ gap: 6 }}>

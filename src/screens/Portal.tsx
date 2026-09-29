@@ -5,7 +5,7 @@ import { money } from '../billing';
 import { fmtDate, fmtTime, PageHead, relDay } from '../ui';
 
 export default function Portal() {
-  const { s, matterId, lookup, actions, go, notify } = useStore();
+  const { s, matterId, lookup, actions, go, notify, access } = useStore();
   const [sel, setSel] = useState(matterId);
   const [text, setText] = useState('');
   const m = lookup.matter(sel) ?? s.matters[0];
@@ -22,7 +22,7 @@ export default function Portal() {
     <>
       <PageHead title="Client portal" sub="Exactly what your client sees when they sign in. Team-only notes and internal documents never show up here.">
         <select className="input" style={{ width: 'auto', maxWidth: 320 }} id="portal-matter" aria-label="Preview as" value={m.id} onChange={(e) => setSel(e.target.value)}>
-          {s.matters.filter((x) => x.status === 'open').map((x) => <option key={x.id} value={x.id}>{lookup.clientOf(x)?.name} — {x.name}</option>)}
+          {s.matters.filter((x) => x.status === 'open' && access.canSee(x)).map((x) => <option key={x.id} value={x.id}>{lookup.clientOf(x)?.name} — {x.name}</option>)}
         </select>
       </PageHead>
 

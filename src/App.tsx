@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore, type Screen } from './store';
 import { formatClock } from './billing';
+import { TEAM, teamName, type Perm } from './data';
 import Today from './screens/Today';
 import Intake from './screens/Intake';
 import PncDetail from './screens/PncDetail';
@@ -103,9 +104,22 @@ function CallBar() {
   );
 }
 
+/** Which permission opens each screen. Screens not listed are open to everyone. */
+function allowed(sc: Screen, can: (p: Perm) => boolean) {
+  switch (sc) {
+    case 'intake': case 'pnc': case 'scheduling': return can('intake');
+    case 'matters': case 'matter': return can('matters') || can('billingView');
+    case 'contacts': case 'contact': case 'conflicts': return can('contacts');
+    case 'time': return can('billingView');
+    case 'portal': case 'phone': return can('matters');
+    case 'settings': return can('settings') || can('users');
+    default: return true;
+  }
+}
+
 export default function App() {
-  const { screen, go, s, toast } = useStore();
-  const overdue = s.tasks.filter((r) => !r.done && r.assignee === 'me' && new Date(r.due).getTime() < Date.now()).length;
+  const { screen, go, s, toast, access, actions } = useStore();
+  const overdue = s.tasks.filter((r) => !r.done && r.assignee === access.user && new Date(r.due).getTime() < Date.now()).length;
 
   const view = {
     today: <Today />,
@@ -134,7 +148,7 @@ export default function App() {
           <span>Prototype</span>
         </div>
         <nav className="nav" aria-label="Main">
-          {NAV.map((n) => (
+          {NAV.filter((n) => allowed(n.id, access.can)).map((n) => (
             <div key={n.id} style={{ display: 'contents' }}>
               {n.group && <div className="nav-group">{n.group}</div>}
               <button aria-current={screen === n.id || (screen === 'matter' && n.id === 'matters') || (screen === 'pnc' && n.id === 'intake') || (screen === 'contact' && n.id === 'contacts') ? 'page' : undefined} onClick={() => go(n.id)}>
@@ -150,13 +164,34 @@ export default function App() {
         <header className="topbar">
           <input className="search" id="global-search" placeholder="Search matters, clients, documents…" aria-label="Search" />
           <span style={{ flex: 1 }} />
-          <TimerWidget />
+          {access.can('time') && <TimerWidget />}
+          <label className="viewas small">
+            <span className="muted">Viewing as</span>
+            <select className="input small tight" id="view-as" value={s.viewAs} onChange={(e) => { actions.setViewAs(e.target.value); go('today'); }}>
+              {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === 'me' ? 'You' : t.name}</option>)}
+            </select>
+          </label>
         </header>
+        {s.viewAs !== 'me' && (
+          <div className="viewas-bar">
+            Previewing what <strong>{teamName(s.viewAs)}</strong> ({access.roleName}) can see and do. <button className="link" onClick={() => { actions.setViewAs('me'); go('today'); }}>Back to your view</button>
+          </div>
+        )}
         <CallBar />
-        <main className="content">{view}</main>
+        <main className="content">{allowed(screen, access.can) ? view : <NoAccess />}</main>
       </div>
       <TaskDrawer />
       {toast && <div className="toast" role="status">{toast}</div>}
+    </div>
+  );
+}
+
+export function NoAccess({ what = 'this area' }: { what?: string }) {
+  const { access } = useStore();
+  return (
+    <div className="panel panel-body stack" style={{ maxWidth: 560 }}>
+      <h2>No access</h2>
+      <p className="muted">{teamName(access.user)}’s role ({access.roleName}) doesn’t include {what}. A managing attorney can change this in Settings → Users & permissions.</p>
     </div>
   );
 }

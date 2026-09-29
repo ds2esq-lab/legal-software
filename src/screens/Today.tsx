@@ -16,14 +16,14 @@ interface Item {
 }
 
 export default function Today() {
-  const { s, actions, lookup, go, notify, openTask } = useStore();
-  const [who, setWho] = useState('me');
+  const { s, actions, lookup, go, notify, openTask, access } = useStore();
+  const [who, setWho] = useState(access.user);
   const today = todayISO();
   const soonWindow = addDays(today, 2);
 
   // One queue from every source of dates: milestones, suspense dates, contact timers, tasks.
   const items: Item[] = [];
-  for (const m of s.matters.filter((x) => x.status === 'open')) {
+  for (const m of s.matters.filter((x) => x.status === 'open' && access.canSee(x))) {
     if (who !== 'all' && m.ball !== who && m.owner !== who) continue;
     const area = lookup.areaOf(m);
     for (const d of dueMilestones(m, area)) if (d.date <= soonWindow) items.push({ key: `${m.id}-ms-${d.milestoneId}`, date: d.date, kind: 'Milestone', what: `${d.name} due`, m });
@@ -33,12 +33,12 @@ export default function Today() {
   for (const r of s.tasks) {
     if (r.done || !r.matterId || (who !== 'all' && r.assignee !== who)) continue;
     const m = lookup.matter(r.matterId);
-    if (m && r.due.slice(0, 10) <= soonWindow) items.push({ key: `task-${r.id}`, date: r.due.slice(0, 10), kind: r.kind === 'court' || r.kind === 'statute' ? 'Deadline' : 'Task', what: r.title, m, taskId: r.id });
+    if (m && access.canSee(m) && r.due.slice(0, 10) <= soonWindow) items.push({ key: `task-${r.id}`, date: r.due.slice(0, 10), kind: r.kind === 'court' || r.kind === 'statute' ? 'Deadline' : 'Task', what: r.title, m, taskId: r.id });
   }
   items.sort((a, b) => a.date.localeCompare(b.date));
   const late = items.filter((i) => i.date < today).length;
 
-  const openMatters = s.matters.filter((m) => m.status === 'open');
+  const openMatters = s.matters.filter((m) => m.status === 'open' && access.canSee(m));
   const allFollowUps = openMatters.filter((m) => contactState(m.lastContact, lookup.areaOf(m)) === 'followup').length;
   const lateMilestones = openMatters.reduce((n, m) => n + dueMilestones(m, lookup.areaOf(m)).filter((d) => d.late).length, 0);
   const touchesDue = s.pncs.filter((p) => { const t = nextTouch(p, s.cadences); return t && t.due <= today; }).length;
@@ -51,7 +51,7 @@ export default function Today() {
     <>
       <PageHead title={greeting} sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '. Everything with a date on it, in one list.'}>
         <select className="input" style={{ width: 'auto' }} id="who" aria-label="Whose list" value={who} onChange={(e) => setWho(e.target.value)}>
-          {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === 'me' ? 'My list' : `${t.name}’s list`}</option>)}
+          {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === access.user ? 'My list' : `${t.id === 'me' ? 'Your' : t.name + '’s'} list`}</option>)}
           <option value="all">Whole firm</option>
         </select>
       </PageHead>

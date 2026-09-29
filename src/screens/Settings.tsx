@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { INCREMENT_OPTIONS, type RoundingMode } from '../billing';
 import type { Cadences, Role, RoleSide } from '../data';
-import { newId, type DueRule, type Milestone, type PracticeArea, type Stage, type TaskTemplate } from '../practice';
-import { TEAM } from '../data';
+import { newId, renderNumber, type DueRule, type Milestone, type PracticeArea, type Stage, type TaskTemplate } from '../practice';
+import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data';
 import { PageHead } from '../ui';
 
-type Section = 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'numbering' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -303,9 +303,164 @@ function RolesEditor() {
   );
 }
 
+function NumberingEditor() {
+  const { s, actions, notify } = useStore();
+  const n = s.numbering;
+  const set = (patch: Partial<typeof n>) => actions.setNumbering({ ...n, ...patch });
+  const scopeLabel = { firm: 'one running sequence for the whole firm', year: 'restarts every January', area: 'separate sequence per practice area', 'area-year': 'per practice area, restarting every January' }[n.scope];
+  return (
+    <div className="grid cols-main">
+      <section className="panel">
+        <div className="panel-head"><h2>Matter number format</h2><span className="small muted">Applies to new Client matters. Existing numbers never change.</span></div>
+        <div className="panel-body stack" style={{ gap: 12 }}>
+          <div className="field">
+            <label htmlFor="num-format">Format</label>
+            <input className="input num" id="num-format" value={n.format} onChange={(e) => set({ format: e.target.value })} />
+            <span className="small muted">Building blocks: <code>{'{YYYY}'}</code> year · <code>{'{YY}'}</code> 2-digit year · <code>{'{AREA}'}</code> practice-area code · <code>{'{CLIENT}'}</code> client’s last name · <code>{'{SEQ}'}</code> the running number</span>
+          </div>
+          <div className="row">
+            {['{YYYY}-{SEQ}', '{AREA}-{YY}-{SEQ}', '{YY}{AREA}{SEQ}', '{CLIENT}-{SEQ}'].map((f) => (
+              <button key={f} className="btn sm" aria-pressed={n.format === f} onClick={() => set({ format: f })}>{f}</button>
+            ))}
+          </div>
+          <div className="grid cols-2" style={{ gap: 10 }}>
+            <div className="field">
+              <label htmlFor="num-scope">Numbering sequence</label>
+              <select className="input" id="num-scope" value={n.scope} onChange={(e) => set({ scope: e.target.value as typeof n.scope })}>
+                <option value="year">Restart every year</option>
+                <option value="firm">Never restart (firm-wide)</option>
+                <option value="area">Separate per practice area</option>
+                <option value="area-year">Per practice area, restart yearly</option>
+              </select>
+              <span className="small muted">{scopeLabel}</span>
+            </div>
+            <div className="field">
+              <label htmlFor="num-digits">Digits in the running number</label>
+              <select className="input" id="num-digits" value={n.digits} onChange={(e) => set({ digits: Number(e.target.value) })}>
+                {[2, 3, 4, 5].map((d) => <option key={d} value={d}>{d} ({String(7).padStart(d, '0')})</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="num-start">Start the sequence at</label>
+              <input className="input num" type="number" min={1} id="num-start" value={n.start} onChange={(e) => set({ start: Math.max(1, Number(e.target.value) || 1) })} />
+            </div>
+          </div>
+          <div><button className="btn sm ghost" onClick={() => { set({ counters: {} }); notify('Sequence counters reset'); }}>Reset sequence counters</button></div>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>Preview</h2></div>
+        <ul className="list">
+          {s.areas.map((a) => (
+            <li key={a.id} className="spread">
+              <span>{a.name} <span className="small muted">code</span>{' '}
+                <input className="input small tight num" style={{ width: 60 }} id={`code-${a.id}`} aria-label={`${a.name} code`} value={a.code ?? ''} onChange={(e) => actions.saveArea({ ...a, code: e.target.value.toUpperCase().slice(0, 6) })} />
+              </span>
+              <strong className="num">{renderNumber(n, n.start, a, 'Whitford')}</strong>
+            </li>
+          ))}
+        </ul>
+        <p className="panel-body small muted">Preview uses a client named Whitford. Any matter’s number can still be edited by hand on the matter page.</p>
+      </section>
+    </div>
+  );
+}
+
+function UsersEditor() {
+  const { s, actions, notify, access } = useStore();
+  const setRole = (r: PermRole) => actions.setPermRoles(s.permRoles.map((x) => (x.id === r.id ? r : x)));
+  const setUser = (u: UserAccess) => actions.setUsers(s.users.map((x) => (x.userId === u.userId ? u : x)));
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <section className="panel">
+        <div className="panel-head"><h2>People</h2><span className="small muted">Each person gets a role and the practice areas whose Client matters they can see.</span></div>
+        <div className="table-wrap">
+          <table className="t">
+            <thead><tr><th>Person</th><th>Role</th><th>Practice areas</th><th /></tr></thead>
+            <tbody>
+              {TEAM.map((t) => {
+                const u = s.users.find((x) => x.userId === t.id) ?? { userId: t.id, roleId: 'paralegal', areas: 'all' as const };
+                return (
+                  <tr key={t.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}><strong style={{ fontWeight: 500 }}>{t.id === 'me' ? 'You' : t.name}</strong><div className="small muted">{t.role}</div></td>
+                    <td>
+                      <select className="input small tight" id={`u-role-${t.id}`} aria-label={`Role for ${t.name}`} value={u.roleId} disabled={t.id === access.user} onChange={(e) => setUser({ ...u, roleId: e.target.value })}>
+                        {s.permRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 8 }}>
+                        <label className="row small" style={{ gap: 4 }}>
+                          <input type="checkbox" id={`u-all-${t.id}`} checked={u.areas === 'all'} onChange={(e) => setUser({ ...u, areas: e.target.checked ? 'all' : [] })} /> All
+                        </label>
+                        {u.areas !== 'all' && s.areas.map((a) => (
+                          <label key={a.id} className="row small" style={{ gap: 4 }}>
+                            <input
+                              type="checkbox"
+                              id={`u-${t.id}-${a.id}`}
+                              checked={(u.areas as string[]).includes(a.id)}
+                              onChange={(e) => setUser({ ...u, areas: e.target.checked ? [...(u.areas as string[]), a.id] : (u.areas as string[]).filter((x) => x !== a.id) })}
+                            />
+                            {a.name}
+                          </label>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="r">{t.id !== access.user && <button className="btn sm ghost" onClick={() => { actions.setViewAs(t.id); notify(`Now previewing ${t.name}’s view`); }}>View as</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head"><h2>Roles</h2><span className="small muted">Tick what each role can do. Changes apply to everyone with that role.</span></div>
+        <div className="table-wrap">
+          <table className="t perm-grid">
+            <thead>
+              <tr>
+                <th>Permission</th>
+                {s.permRoles.map((r) => (
+                  <th key={r.id} style={{ minWidth: 110 }}>
+                    <input className="input small tight" style={{ textAlign: 'center', fontWeight: 600 }} id={`r-name-${r.id}`} aria-label="Role name" value={r.name} onChange={(e) => setRole({ ...r, name: e.target.value })} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {PERMS.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ minWidth: 220 }}><strong style={{ fontWeight: 500 }}>{p.label}</strong><div className="small muted">{p.help}</div></td>
+                  {s.permRoles.map((r) => (
+                    <td key={r.id}>
+                      <input
+                        type="checkbox"
+                        id={`perm-${r.id}-${p.id}`}
+                        aria-label={`${r.name}: ${p.label}`}
+                        checked={r.perms[p.id]}
+                        disabled={r.id === 'managing' && (p.id === 'users' || p.id === 'settings')}
+                        onChange={(e) => setRole({ ...r, perms: { ...r.perms, [p.id as Perm]: e.target.checked } })}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="panel-body"><AddRow id="add-perm-role" placeholder="New role, e.g. Of Counsel" onAdd={(name) => actions.setPermRoles([...s.permRoles, { id: newId('pr'), name, perms: Object.fromEntries(PERMS.map((p) => [p.id, false])) as Record<Perm, boolean> }])} /></div>
+      </section>
+      <p className="small muted">Individual matters can also be locked to named people (an ethical wall) from the matter’s Access panel.</p>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { s, actions, notify } = useStore();
-  const [section, setSection] = useState<Section>('areas');
+  const { access } = useStore();
+  const [section, setSection] = useState<Section>(access.can('settings') ? 'areas' : 'users');
   const [areaId, setAreaId] = useState(s.areas[0]?.id);
   const area = s.areas.find((a) => a.id === areaId) ?? s.areas[0];
 
@@ -313,7 +468,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['numbering', 'Matter numbering'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' ? access.can('users') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -340,6 +495,8 @@ export default function Settings() {
         </div>
       )}
 
+      {section === 'users' && access.can('users') && <UsersEditor />}
+      {section === 'numbering' && <NumberingEditor />}
       {section === 'roles' && <RolesEditor />}
       {section === 'intake' && <CadenceEditor />}
 

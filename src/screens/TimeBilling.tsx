@@ -5,11 +5,12 @@ import { entryValue } from '../calc';
 import { BillingPill, fmtDate, PageHead, Person } from '../ui';
 
 export default function TimeBilling() {
-  const { s, lookup, go } = useStore();
+  const { s, lookup, go, access } = useStore();
   const [sample, setSample] = useState('13');
   const n = Math.max(0, parseInt(sample, 10) || 0);
 
   const rows = s.matters
+    .filter((m) => access.canSee(m))
     .map((m) => {
       const entries = s.timeEntries.filter((t) => t.matterId === m.id && !t.invoiced);
       const mins = entries.filter((t) => t.billable).reduce((a, t) => a + billedMinutes(t.actualMinutes, s.billing), 0);

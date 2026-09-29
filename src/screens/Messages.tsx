@@ -4,9 +4,9 @@ import { PageHead } from '../ui';
 import Thread from '../Thread';
 
 export default function Messages() {
-  const { s, lookup, go } = useStore();
+  const { s, lookup, go, access } = useStore();
   const [ch, setCh] = useState('general');
-  const matterChannels = s.matters.filter((m) => s.messages.some((x) => x.channel === m.id));
+  const matterChannels = s.matters.filter((m) => access.canSee(m) && s.messages.some((x) => x.channel === m.id));
   const m = lookup.matter(ch);
 
   return (

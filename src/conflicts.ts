@@ -20,6 +20,7 @@ export interface Hit {
     title: string;
     role: Role;
     date?: string; // closed date for former matters
+    restricted?: boolean; // behind an ethical wall: show that it exists, never what it is
   }[];
 }
 
@@ -77,7 +78,7 @@ export function searchConflicts(terms: Term[], contacts: Contact[], matters: Mat
       }
       for (const m of matters) {
         for (const party of m.parties)
-          if (party.contactId === c.id) links.push({ kind: m.status === 'open' ? 'open' : 'former', id: m.id, title: m.name, role: roleOf(party.role), date: m.closedOn });
+          if (party.contactId === c.id) links.push({ kind: m.status === 'open' ? 'open' : 'former', id: m.id, title: m.restrictedTo?.length ? 'Restricted matter' : m.name, role: roleOf(party.role), date: m.closedOn, restricted: !!m.restrictedTo?.length });
       }
       // A contact attached only to the PNC being checked is not a hit.
       if (!links.length && pncs.some((p) => p.id === excludePncId && p.parties.some((x) => x.contactId === c.id))) continue;

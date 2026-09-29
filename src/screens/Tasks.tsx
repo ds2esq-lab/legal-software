@@ -166,12 +166,13 @@ export function NewTaskForm({ matterId, pncId, onDone }: { matterId?: string; pn
 }
 
 export default function Tasks() {
-  const { s } = useStore();
-  const [who, setWho] = useState('me');
+  const { s, lookup, access } = useStore();
+  const [who, setWho] = useState(access.user);
   const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState<TaskStatus | 'open'>('open');
   const now = Date.now();
-  const mine = s.tasks.filter((t) => who === 'all' || t.assignee === who).filter((t) => status === 'open' || t.status === status || (status === 'done' && t.done));
+  const visible = s.tasks.filter((t) => { const m = t.matterId ? lookup.matter(t.matterId) : undefined; return (!m || access.canSee(m)) && (!t.pncId || access.can('intake')); });
+  const mine = visible.filter((t) => who === 'all' || t.assignee === who).filter((t) => status === 'open' || t.status === status || (status === 'done' && t.done));
   const open = mine.filter((t) => !t.done).sort((a, b) => a.due.localeCompare(b.due));
   const groups: [string, Task[]][] = [
     ['Overdue', open.filter((t) => new Date(t.due).getTime() < now)],
@@ -185,7 +186,7 @@ export default function Tasks() {
     <>
       <PageHead title="Tasks" sub="Everything someone has to do, with an owner and a due date. Tasks keep nudging until they’re done: three snoozes, then the backup person is brought in. Court and statute deadlines can’t be snoozed.">
         <select className="input" style={{ width: 'auto' }} id="task-who" aria-label="Whose tasks" value={who} onChange={(e) => setWho(e.target.value)}>
-          {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === 'me' ? 'My tasks' : `${t.name}’s tasks`}</option>)}
+          {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === access.user ? 'My tasks' : `${t.id === 'me' ? 'Your' : t.name + '’s'} tasks`}</option>)}
           <option value="all">Everyone’s tasks</option>
         </select>
         <button className="btn primary" onClick={() => setAdding((a) => !a)}>{adding ? 'Cancel' : '+ New task'}</button>
@@ -194,7 +195,7 @@ export default function Tasks() {
         <button aria-pressed={status === 'open'} onClick={() => setStatus('open')}>All</button>
         {TASK_STATUSES.map((x) => (
           <button key={x.id} aria-pressed={status === x.id} onClick={() => setStatus(x.id)}>
-            {x.label} <span className="num muted">{s.tasks.filter((t) => (who === 'all' || t.assignee === who) && t.status === x.id).length}</span>
+            {x.label} <span className="num muted">{visible.filter((t) => (who === 'all' || t.assignee === who) && t.status === x.id).length}</span>
           </button>
         ))}
       </div>

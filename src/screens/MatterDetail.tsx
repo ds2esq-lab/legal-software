@@ -13,7 +13,9 @@ import { NewTaskForm, TaskRow } from './Tasks';
 type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoiceList({ m }: { m: Matter }) {
-  const { s, actions, notify } = useStore();
+  const { s, actions, notify, access } = useStore();
+  const canInv = access.can('invoices');
+  const canPay = access.can('payments');
   const [open, setOpen] = useState<string | null>(null);
   const list = s.invoices.filter((i) => i.matterId === m.id);
   const VIA = { portal: 'client portal', email: 'email', mail: 'mail' } as const;
@@ -34,7 +36,7 @@ export function InvoiceList({ m }: { m: Matter }) {
                 </span>
               </span>
               <span className="row" style={{ gap: 4 }}>
-                {i.status === 'draft' && (
+                {i.status === 'draft' && canInv && (
                   <>
                     <button className="btn sm primary" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} posted to the client portal`); }}>Send to portal</button>
                     <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'email'); notify(`${i.number} emailed to the client`); }}>Email</button>
@@ -42,8 +44,8 @@ export function InvoiceList({ m }: { m: Matter }) {
                     <button className="btn sm ghost danger" onClick={() => { actions.deleteDraftInvoice(i.id); notify('Draft deleted. Its time and fees are unbilled again.'); }}>Delete draft</button>
                   </>
                 )}
-                {i.status === 'sent' && i.sentVia !== 'portal' && <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} also posted to the portal`); }}>Also post to portal</button>}
-                {i.status === 'sent' && <button className="btn sm" onClick={() => { actions.markInvoicePaid(i.id); notify(`${i.number} marked paid`); }}>Record payment</button>}
+                {i.status === 'sent' && canInv && i.sentVia !== 'portal' && <button className="btn sm" onClick={() => { actions.sendInvoice(i.id, 'portal'); notify(`${i.number} also posted to the portal`); }}>Also post to portal</button>}
+                {i.status === 'sent' && canPay && <button className="btn sm" onClick={() => { actions.markInvoicePaid(i.id); notify(`${i.number} marked paid`); }}>Record payment</button>}
               </span>
             </div>
             {open === i.id && (
@@ -72,7 +74,7 @@ export function InvoiceList({ m }: { m: Matter }) {
 }
 
 export function InvoicePreview({ m }: { m: Matter }) {
-  const { s, actions, notify } = useStore();
+  const { s, actions, notify, access } = useStore();
   const fees = s.flatFees.filter((f) => f.matterId === m.id && f.status === 'unbilled');
   const entries = s.timeEntries.filter((t) => t.matterId === m.id && !t.invoiced && t.billable);
   const hourlyApplies = hourlyRate(m) > 0;
@@ -109,14 +111,14 @@ export function InvoicePreview({ m }: { m: Matter }) {
       )}
       <div className="spread" style={{ flexWrap: 'wrap' }}>
         <span><span className="label">Invoice total</span> <span className="num" style={{ fontSize: 20, marginLeft: 8 }}>{money(total)}</span></span>
-        <span className="row" style={{ gap: 6 }}>
+        {access.can('invoices') ? <span className="row" style={{ gap: 6 }}>
           <button className="btn primary" disabled={total === 0} onClick={() => { actions.createInvoice(m.id); notify(`Draft invoice for ${money(total)} created. Nothing has been sent.`); }}>
             Create invoice
           </button>
           <button className="btn" disabled={total === 0} onClick={() => { actions.createInvoice(m.id, 'portal'); notify(`Invoice for ${money(total)} created and posted to the client portal`); }}>
             Create & send to portal
           </button>
-        </span>
+        </span> : <span className="small muted">Your role can see billing but not create invoices.</span>}
       </div>
     </div>
   );
@@ -312,11 +314,69 @@ function TimeTab({ m }: { m: Matter }) {
   );
 }
 
+function AccessPanel({ m }: { m: Matter }) {
+  const { s, actions, access, notify } = useStore();
+  const walled = !!m.restrictedTo?.length;
+  const whoCan = TEAM.filter((t) => {
+    const u = s.users.find((x) => x.userId === t.id);
+    const role = s.permRoles.find((r) => r.id === u?.roleId);
+    if (!u || !role) return false;
+    if (walled) return m.restrictedTo!.includes(t.id);
+    return (role.perms.matters && (u.areas === 'all' || u.areas.includes(m.areaId))) || role.perms.billingView;
+  });
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Access</h2>
+        {walled ? <span className="pill danger">🔒 Restricted</span> : <span className="pill">Normal</span>}
+      </div>
+      <div className="panel-body stack" style={{ gap: 8 }}>
+        <span className="small">Can see this matter: {whoCan.map((t) => (t.id === 'me' ? 'You' : t.name)).join(', ') || 'no one'}</span>
+        {access.can('users') ? (
+          <>
+            <label className="row small" style={{ gap: 6 }}>
+              <input type="checkbox" id="wall" checked={walled} onChange={(e) => { actions.setRestricted(m.id, e.target.checked ? [access.user] : undefined); notify(e.target.checked ? 'Ethical wall on. Only the people checked below can see this matter.' : 'Wall removed. Normal access rules apply.'); }} />
+              Restrict to specific people (ethical wall)
+            </label>
+            {walled && (
+              <div className="row" style={{ gap: 10 }}>
+                {TEAM.map((t) => (
+                  <label key={t.id} className="row small" style={{ gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      id={`wall-${t.id}`}
+                      checked={m.restrictedTo!.includes(t.id)}
+                      disabled={t.id === access.user}
+                      onChange={(e) => actions.setRestricted(m.id, e.target.checked ? [...m.restrictedTo!, t.id] : m.restrictedTo!.filter((x) => x !== t.id))}
+                    />
+                    {t.id === 'me' ? 'You' : t.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            {walled && <span className="small muted">Conflict checks still search this matter but show it only as “Restricted matter”.</span>}
+          </>
+        ) : (
+          <span className="small muted">Only someone with “Users & permissions” can change access.</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function MatterDetail() {
-  const { s, matterId, lookup, go, actions, notify, openTask } = useStore();
+  const { s, matterId, lookup, go, actions, notify, openTask, access } = useStore();
   const [tab, setTab] = useState<Tab>('timeline');
   const m = lookup.matter(matterId);
   if (!m) return <p>Matter not found.</p>;
+  if (!access.canSee(m))
+    return (
+      <div className="panel panel-body stack" style={{ maxWidth: 560 }}>
+        <h2>{access.walledOff(m) ? '🔒 Restricted matter' : 'No access'}</h2>
+        <p className="muted">{access.walledOff(m) ? 'This matter is behind an ethical wall. Only the people it’s restricted to can open it.' : 'This matter is in a practice area your role can’t see.'}</p>
+        <div><button className="btn" onClick={() => go('matters')}>Back to Client matters</button></div>
+      </div>
+    );
   const area = lookup.areaOf(m);
   const client = lookup.clientOf(m);
   const stageIdx = area.stages.findIndex((x) => x.id === m.stageId);
@@ -391,6 +451,11 @@ export default function MatterDetail() {
               <DateField id="d-susp" label="Suspense date" value={m.suspense} onChange={(v) => up({ suspense: v })} />
               <input className="input small" id="d-susp-note" aria-label="Suspense note" placeholder="What’s the suspense for?" value={m.suspenseNote ?? ''} onChange={(e) => up({ suspenseNote: e.target.value || undefined })} />
             </div>
+            <div className="field">
+              <label htmlFor="d-number">Matter number</label>
+              <input className="input num" id="d-number" value={m.number} onChange={(e) => up({ number: e.target.value })} />
+            </div>
+            <div />
             <label className="row small"><input type="checkbox" id="d-stalled" checked={m.stalled} onChange={(e) => up({ stalled: e.target.checked })} /> Stalled</label>
             <label className="row small"><input type="checkbox" id="d-prio" checked={m.priority} onChange={(e) => up({ priority: e.target.checked })} /> Priority</label>
           </div>
@@ -418,6 +483,7 @@ export default function MatterDetail() {
             </section>
           )}
           <PartiesPanel target={{ kind: 'matter', id: m.id }} parties={m.parties} />
+          <AccessPanel m={m} />
         </div>
       </div>
 
@@ -433,7 +499,7 @@ export default function MatterDetail() {
       {(closing || m.status === 'closed') && <Closeout m={m} />}
 
       <div className="tabs" role="tablist">
-        {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
+        {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).filter((t) => (t !== 'time' || access.can('time')) && (t !== 'billing' || access.can('billingView'))).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
             {t === 'tasks' && openTasks.length > 0 && <span className="num muted"> {openTasks.length}</span>}

@@ -22,6 +22,10 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Phone | Simulated VoIP: caller matched to matter, calls turned into time entries |
 | Client portal | What the client sees: status, messages, shared documents, invoices |
 
+## Permissions
+
+Roles (editable) grant permissions such as intake, Client matters, billing, invoices, payments and settings. Each person also gets the practice areas they can see, and any matter can be restricted to named people (an ethical wall). Conflict checks still search walled matters but show them only as "Restricted matter". Use **Viewing as** in the top bar to preview anyone's view.
+
 ## Configurable, not hard-coded
 
 Practice areas, their stages, milestones, deadline rules ("Drafts due 5 workdays after questionnaire"), contact timers and intake cadences are all edited in **Settings**. Any matter can override a computed due date.

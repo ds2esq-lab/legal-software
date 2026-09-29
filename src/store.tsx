@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
-import type { Invoice, InvoiceLine } from './data';
+import type { Invoice, InvoiceLine, Perm, PermRole, UserAccess } from './data';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
 import { billedMinutes, DEFAULT_BILLING, type BillingSettings } from './billing';
-import { addDays, addWorkdays, DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
+import { addDays, addWorkdays, DEFAULT_AREAS, DEFAULT_NUMBERING, nextNumber, type Numbering, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
 export type Screen =
   | 'today'
@@ -43,6 +43,10 @@ interface State {
   pncs: Pnc[];
   contacts: Contact[];
   roles: Role[];
+  permRoles: PermRole[];
+  users: UserAccess[];
+  viewAs: string;
+  numbering: Numbering;
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
   invoices: Invoice[];
@@ -58,7 +62,7 @@ interface State {
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
 const CONFIG_KEY = 'docket.config.v4';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles'>> {
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -77,6 +81,10 @@ function initialState(): State {
     pncs: seed.pncs,
     contacts: seed.contacts,
     roles: cfg.roles ?? seed.DEFAULT_ROLES,
+    permRoles: cfg.permRoles ?? seed.DEFAULT_PERM_ROLES,
+    users: cfg.users ?? seed.DEFAULT_USERS,
+    viewAs: 'me',
+    numbering: cfg.numbering ?? DEFAULT_NUMBERING,
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
     invoices: seed.invoices,
@@ -131,11 +139,11 @@ function useStoreValue() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing, s.roles]);
+  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -237,6 +245,21 @@ function useStoreValue() {
             : { ...x, matters: x.matters.map((m) => (m.id === target.id ? { ...m, conflicts: [c, ...m.conflicts] } : m)) },
         );
       },
+      setNumbering(numbering: Numbering) {
+        setS((x) => ({ ...x, numbering }));
+      },
+      setViewAs(userId: string) {
+        setS((x) => ({ ...x, viewAs: userId }));
+      },
+      setPermRoles(permRoles: PermRole[]) {
+        setS((x) => ({ ...x, permRoles }));
+      },
+      setUsers(users: UserAccess[]) {
+        setS((x) => ({ ...x, users }));
+      },
+      setRestricted(matterId: string, restrictedTo: string[] | undefined) {
+        setS((x) => ({ ...x, matters: x.matters.map((m) => (m.id === matterId ? { ...m, restrictedTo } : m)) }));
+      },
       setRoles(roles: Role[]) {
         setS((x) => ({ ...x, roles }));
       },
@@ -309,9 +332,12 @@ function useStoreValue() {
           if (!p || !area) return x;
           const engaged = area.milestones[0];
           const primary = x.contacts.find((c) => c.id === (p.parties.find((q) => q.primary) ?? p.parties[0])?.contactId);
+          // With the sample data's 2026-01xx numbers, start after the highest one already used this year.
+          const existingMax = Math.max(0, ...x.matters.filter((q) => q.number.startsWith(todayISO().slice(0, 4))).map((q) => Number(q.number.split('-').pop()) || 0));
+          const num = nextNumber(x.numbering, area, (primary?.name ?? 'X').split(',')[0], x.numbering.format === '{YYYY}-{SEQ}' && x.numbering.scope === 'year' ? existingMax : 0);
           const matter: Matter = {
             id: matterId,
-            number: `2026-${String(x.matters.filter((m) => m.status === 'open').length + 101).padStart(4, '0')}`,
+            number: num.number,
             name: `${primary?.name.split(',')[0] ?? 'New'} ${area.name}`,
             parties: p.parties,
             notes: [],
@@ -332,6 +358,7 @@ function useStoreValue() {
           };
           return {
             ...x,
+            numbering: { ...x.numbering, counters: num.counters },
             tasks: [...x.tasks, ...stageTasksFor(matter, area, matter.stageId, x.tasks)],
             matters: [...x.matters, matter],
             pncs: x.pncs.map((q) => (q.id === id ? { ...q, stage: 'hired', matterId } : q)),
@@ -586,7 +613,20 @@ function useStoreValue() {
     [s.matters, s.contacts, s.areas, s.pncs, s.roles],
   );
 
-  return { s, actions, lookup, screen, matterId, pncId, contactId, go, toast, notify, taskId, openTask: setTaskId };
+  // What the person being viewed as is allowed to do and see.
+  const access = useMemo(() => {
+    const u = s.users.find((x) => x.userId === s.viewAs) ?? s.users[0];
+    const role = s.permRoles.find((r) => r.id === u?.roleId);
+    const can = (p: Perm) => !!role?.perms[p];
+    const areaOk = (areaId: string) => !!u && (u.areas === 'all' || u.areas.includes(areaId));
+    const walledOff = (m: Matter) => !!m.restrictedTo?.length && !m.restrictedTo.includes(s.viewAs);
+    /** Can open the matter at all. People with Client matters access are limited to their practice areas;
+     *  billing-only roles (bookkeeper) see every matter for billing. Nobody gets past an ethical wall. */
+    const canSee = (m: Matter) => !walledOff(m) && (can('matters') ? areaOk(m.areaId) : can('billingView'));
+    return { user: s.viewAs, roleName: role?.name ?? 'No role', can, areaOk, canSee, walledOff };
+  }, [s.users, s.permRoles, s.viewAs]);
+
+  return { s, actions, lookup, access, screen, matterId, pncId, contactId, go, toast, notify, taskId, openTask: setTaskId };
 }
 
 type Store = ReturnType<typeof useStoreValue>;
