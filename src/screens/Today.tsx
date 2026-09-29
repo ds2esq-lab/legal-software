@@ -9,7 +9,8 @@ import { ContactPill, DuePill, fmtTime, PageHead, Person, relDay } from '../ui';
 interface Item {
   key: string;
   date: string;
-  kind: 'Milestone' | 'Suspense' | 'Contact' | 'Deadline';
+  kind: 'Milestone' | 'Suspense' | 'Contact' | 'Deadline' | 'Task';
+  taskId?: string;
   what: string;
   m: Matter;
 }
@@ -20,7 +21,7 @@ export default function Today() {
   const today = todayISO();
   const soonWindow = addDays(today, 2);
 
-  // One queue from every source of dates: milestones, suspense dates, contact timers, reminders.
+  // One queue from every source of dates: milestones, suspense dates, contact timers, tasks.
   const items: Item[] = [];
   for (const m of s.matters.filter((x) => x.status === 'open')) {
     if (who !== 'all' && m.ball !== who && m.owner !== who) continue;
@@ -29,10 +30,10 @@ export default function Today() {
     if (m.suspense && m.suspense <= soonWindow) items.push({ key: `${m.id}-susp`, date: m.suspense, kind: 'Suspense', what: m.suspenseNote || 'Suspense date', m });
     if (contactState(m.lastContact, area) === 'followup') items.push({ key: `${m.id}-contact`, date: addDays(m.lastContact!, area.cadence.followUp), kind: 'Contact', what: 'Client follow-up needed', m });
   }
-  for (const r of s.reminders) {
+  for (const r of s.tasks) {
     if (r.done || !r.matterId || (who !== 'all' && r.assignee !== who)) continue;
     const m = lookup.matter(r.matterId);
-    if (m && r.due.slice(0, 10) <= soonWindow) items.push({ key: `rem-${r.id}`, date: r.due.slice(0, 10), kind: 'Deadline', what: r.title, m });
+    if (m && r.due.slice(0, 10) <= soonWindow) items.push({ key: `task-${r.id}`, date: r.due.slice(0, 10), kind: r.kind === 'court' || r.kind === 'statute' ? 'Deadline' : 'Task', what: r.title, m, taskId: r.id });
   }
   items.sort((a, b) => a.date.localeCompare(b.date));
   const late = items.filter((i) => i.date < today).length;
@@ -100,7 +101,7 @@ export default function Today() {
                 {i.kind === 'Suspense' && (
                   <button className="btn sm" onClick={() => { actions.updateMatter(i.m.id, { suspense: addDays(today, 7) }); notify('Suspense moved out one week'); }}>+1 week</button>
                 )}
-                {i.kind === 'Deadline' && <button className="btn sm" onClick={() => go('reminders')}>Open</button>}
+                {(i.kind === 'Deadline' || i.kind === 'Task') && <button className="btn sm" onClick={() => { actions.setTaskDone(i.taskId!, true); notify('Task done'); }}>Done</button>}
               </li>
             ))}
           </ul>

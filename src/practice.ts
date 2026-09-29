@@ -17,6 +17,18 @@ export interface Milestone {
   rule?: DueRule; // when set, the milestone gets an automatic due date
 }
 
+/** A task created automatically when a matter enters a stage. */
+export interface TaskTemplate {
+  id: string;
+  stageId: string;
+  title: string;
+  assignTo: 'owner' | 'ball' | string; // responsible attorney, whoever has the ball, or a team member id
+  dueIn: number;
+  dueUnit: 'days' | 'workdays';
+  kind: 'internal' | 'client' | 'court';
+  checklist: string[];
+}
+
 export interface PracticeArea {
   id: string;
   name: string;
@@ -25,6 +37,7 @@ export interface PracticeArea {
   cadence: { soon: number; followUp: number }; // days since last contact
   planTypes: string[];
   planLabel: string; // what this area calls a plan type ("Plan", "Type", "Deed type")
+  stageTasks: TaskTemplate[];
 }
 
 export const slug = (s: string) =>
@@ -38,6 +51,11 @@ const ms = (name: string, rule?: [string, number, DueRule['unit']]): Milestone =
   id: slug(name),
   name,
   rule: rule ? { after: slug(rule[0]), amount: rule[1], unit: rule[2] } : undefined,
+});
+
+let tt = 0;
+const task = (stage: string, title: string, assignTo: string, dueIn: number, dueUnit: TaskTemplate['dueUnit'] = 'workdays', checklist: string[] = [], kind: TaskTemplate['kind'] = 'internal'): TaskTemplate => ({
+  id: `tt${++tt}`, stageId: slug(stage), title, assignTo, dueIn, dueUnit, kind, checklist,
 });
 
 // Seeded from how the firm runs today. "Waiting on client / 3rd party / attorney" is NOT a stage here;
@@ -65,6 +83,15 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    stageTasks: [
+      task('Info Gathering', 'Send questionnaire and document checklist', 'dana', 1, 'workdays', ['Questionnaire link sent', 'Document checklist sent', 'Follow-up set']),
+      task('Initial Drafting', 'Draft documents', 'owner', 5),
+      task('Check Please', 'Attorney review of drafts', 'me', 2),
+      task('Send Drafts', 'Send drafts and book draft discussion', 'dana', 1, 'workdays', ['Drafts uploaded to portal', 'Email to client', 'Draft discussion booked']),
+      task('Signing', 'Prepare signing binder', 'dana', 2, 'workdays', ['Originals printed', 'Witnesses and notary booked', 'Funding instructions letter', 'Binder assembled']),
+      task('Record Deed', 'Record deed with county', 'dana', 3),
+      task('Ready to Close', 'Closeout: scan originals, send funding letter', 'dana', 5, 'workdays', ['Originals scanned to file', 'Funding letter sent', 'Final invoice']),
+    ],
   },
   {
     id: 'fpet',
@@ -85,6 +112,14 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    stageTasks: [
+      task('Info Gathering', 'Collect death certificate, will and asset list', 'priya', 5, 'workdays', ['Certified death certificate', 'Original will', 'Asset list', 'Heir contact info']),
+      task('Packet Submitted', 'Follow up with clerk on petition', 'priya', 10),
+      task('Qualified', 'Publish notice to creditors', 'priya', 5, 'workdays', [], 'court'),
+      task('Qualified', 'Open estate bank account (EIN first)', 'priya', 7),
+      task('Pre-Inventory', 'Gather date-of-death values', 'priya', 14),
+      task('Accounting Submitted', 'Calendar hearing on accounting', 'priya', 3),
+    ],
   },
   {
     id: 'ipet',
@@ -102,6 +137,10 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    stageTasks: [
+      task('Info Gathering', 'Collect death certificate, will and asset list', 'priya', 5, 'workdays', ['Certified death certificate', 'Original will', 'Asset list']),
+      task('Docs Recorded', 'Send notices to heirs and creditors', 'priya', 3, 'workdays', [], 'court'),
+    ],
   },
   {
     id: 'gc',
@@ -119,6 +158,12 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 14, followUp: 21 },
+    stageTasks: [
+      task('Info Gathering', 'Get physician evaluation', 'dana', 10),
+      task('Hearing Scheduled', 'Serve notice of hearing', 'dana', 2, 'workdays', [], 'court'),
+      task('Hearing Scheduled', 'Hearing prep call with petitioner', 'owner', 3),
+      task('Post Hearing', 'File oath and bond; order letters', 'dana', 5),
+    ],
   },
   {
     id: 'deed',
@@ -136,6 +181,12 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 3, followUp: 5 },
+    stageTasks: [
+      task('Info Gathering', 'Pull current vesting deed', 'dana', 2),
+      task('Ready to Sign', 'Book signing and notary', 'dana', 2),
+      task('Signed', 'Record deed', 'dana', 2),
+      task('Recorded', 'Mail recorded deed to client', 'dana', 3, 'workdays', [], 'client'),
+    ],
   },
   {
     id: 'biz',
@@ -153,6 +204,11 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    stageTasks: [
+      task('Info Gathering', 'Name availability search', 'marcus', 1),
+      task('Send Drafts', 'Send drafts and book review call', 'dana', 1),
+      task('Signing', 'File articles; apply for EIN', 'marcus', 2, 'workdays', ['Articles filed', 'EIN obtained', 'Operating agreement signed']),
+    ],
   },
   {
     id: 'fam',
@@ -170,6 +226,10 @@ export const DEFAULT_AREAS: PracticeArea[] = [
       ms('Closed'),
     ],
     cadence: { soon: 10, followUp: 14 },
+    stageTasks: [
+      task('Send Drafts', 'Send drafts to client and opposing counsel', 'dana', 1),
+      task('Signing', 'Arrange signing with both parties', 'dana', 3),
+    ],
   },
 ];
 

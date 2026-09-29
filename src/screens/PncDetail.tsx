@@ -6,6 +6,7 @@ import { NotesPanel, PartiesPanel } from '../people';
 import { DuePill, fmtDate, PageHead } from '../ui';
 import { ConflictBadge, ConflictPanel } from '../conflictPanel';
 import { HireForm } from './Intake';
+import { NewTaskForm, TaskRow } from './Tasks';
 
 export default function PncDetail() {
   const { s, pncId, lookup, actions, go, notify } = useStore();
@@ -41,6 +42,12 @@ export default function PncDetail() {
           <ConflictPanel target={{ kind: 'pnc', id: p.id }} parties={p.parties} checks={p.conflicts} />
 
           <PartiesPanel target={{ kind: 'pnc', id: p.id }} parties={p.parties} title="People on this PNC matter" />
+
+          <section className="panel">
+            <div className="panel-head"><h2>Tasks</h2></div>
+            <div>{s.tasks.filter((t) => t.pncId === p.id).map((t) => <TaskRow key={t.id} t={t} showMatter={false} />)}</div>
+            <div style={{ borderTop: '1px solid var(--line)' }}><NewTaskForm pncId={p.id} /></div>
+          </section>
 
           <NotesPanel target={{ kind: 'pnc', id: p.id }} notes={p.notes} />
         </div>

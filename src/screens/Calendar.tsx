@@ -19,7 +19,7 @@ export default function Calendar() {
 
   return (
     <>
-      <PageHead title="Calendar" sub="Meetings, consults and court deadlines on one calendar. Deadlines come from Reminders, so they can’t drift out of sync.">
+      <PageHead title="Calendar" sub="Meetings, consults and court deadlines on one calendar. Deadlines come from Tasks, so they can’t drift out of sync.">
         <button className="btn" onClick={() => setOffset((o) => o - 1)}>← Prev</button>
         <button className="btn" onClick={() => setOffset(0)}>This week</button>
         <button className="btn" onClick={() => setOffset((o) => o + 1)}>Next →</button>
@@ -35,7 +35,7 @@ export default function Calendar() {
         {days.map((d) => {
           const iso = d.toISOString();
           const evs = s.events.filter((e) => sameDay(e.start, d)).sort((a, b) => a.start.localeCompare(b.start));
-          const dls = s.reminders.filter((r) => !r.done && sameDay(r.due, d));
+          const dls = s.tasks.filter((r) => !r.done && (r.kind === 'court' || r.kind === 'statute') && sameDay(r.due, d));
           return (
             <div key={iso} className={`day ${daysFromToday(iso) === 0 ? 'today' : ''}`}>
               <div className="day-head">
@@ -44,7 +44,7 @@ export default function Calendar() {
               </div>
               <div className="day-body">
                 {dls.map((r) => (
-                  <button key={r.id} className="ev deadline" onClick={() => go('reminders')}>
+                  <button key={r.id} className="ev deadline" onClick={() => go('tasks')}>
                     <strong>Due {fmtTime(r.due)}</strong>
                     <div>{r.title}</div>
                   </button>

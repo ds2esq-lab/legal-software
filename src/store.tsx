@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
-import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Reminder, Role, TimeEntry } from './data';
+import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
 import { DEFAULT_BILLING, type BillingSettings } from './billing';
-import { DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
+import { addDays, addWorkdays, DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
 export type Screen =
   | 'today'
@@ -16,7 +16,7 @@ export type Screen =
   | 'time'
   | 'calendar'
   | 'scheduling'
-  | 'reminders'
+  | 'tasks'
   | 'messages'
   | 'phone'
   | 'portal'
@@ -44,7 +44,7 @@ interface State {
   roles: Role[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
-  reminders: Reminder[];
+  tasks: Task[];
   events: CalEvent[];
   messages: Message[];
   calls: CallLog[];
@@ -55,7 +55,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v3';
+const CONFIG_KEY = 'docket.config.v4';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -68,7 +68,7 @@ function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'r
 function initialState(): State {
   const cfg = loadConfig();
   return {
-    areas: cfg.areas ?? DEFAULT_AREAS,
+    areas: (cfg.areas ?? DEFAULT_AREAS).map((a) => ({ ...a, stageTasks: a.stageTasks ?? [] })),
     cadences: cfg.cadences ?? seed.DEFAULT_CADENCES,
     billing: cfg.billing ?? DEFAULT_BILLING,
     matters: seed.matters,
@@ -77,7 +77,7 @@ function initialState(): State {
     roles: cfg.roles ?? seed.DEFAULT_ROLES,
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
-    reminders: seed.reminders,
+    tasks: seed.tasks,
     events: seed.events,
     messages: seed.messages,
     calls: seed.calls,
@@ -88,6 +88,33 @@ function initialState(): State {
 }
 
 export type Target = { kind: 'matter' | 'pnc'; id: string };
+
+/** Tasks a practice area creates when a matter enters a stage. Skips ones already open on the matter. */
+function stageTasksFor(m: Matter, area: PracticeArea, stageId: string, existing: Task[]): Task[] {
+  const today = todayISO();
+  return area.stageTasks
+    .filter((t) => t.stageId === stageId)
+    .filter((t) => !existing.some((e) => e.matterId === m.id && !e.done && e.title === t.title))
+    .map((t) => {
+      const assignee = t.assignTo === 'owner' ? m.owner : t.assignTo === 'ball' ? (['client', 'third', 'court'].includes(m.ball) ? m.owner : m.ball) : t.assignTo;
+      const dueDay = t.dueUnit === 'workdays' ? addWorkdays(today, t.dueIn) : addDays(today, t.dueIn);
+      return {
+        id: newId('task'),
+        title: t.title,
+        matterId: m.id,
+        due: new Date(dueDay + 'T17:00:00').toISOString(),
+        assignee,
+        escalateTo: assignee === 'me' ? undefined : 'me',
+        kind: t.kind,
+        done: false,
+        snoozes: 0,
+        log: [`Created automatically when the matter moved to ${area.stages.find((x) => x.id === stageId)?.name}`],
+        checklist: t.checklist.map((text) => ({ text, done: false })),
+        source: 'stage' as const,
+        createdAt: new Date().toISOString(),
+      };
+    });
+}
 
 function useStoreValue() {
   const [s, setS] = useState<State>(initialState);
@@ -127,6 +154,16 @@ function useStoreValue() {
       // ----- Matters -----
       updateMatter(id: string, patch: Partial<Matter>) {
         patchMatter(id, (m) => ({ ...m, ...patch }));
+      },
+      /** Change stage and create that stage's tasks. Returns via state; the count is reported by the caller. */
+      moveStage(id: string, stageId: string) {
+        setS((x) => {
+          const m = x.matters.find((q) => q.id === id);
+          const area = m && x.areas.find((a) => a.id === m.areaId);
+          if (!m || !area || m.stageId === stageId) return x;
+          const moved = { ...m, stageId };
+          return { ...x, matters: x.matters.map((q) => (q.id === id ? moved : q)), tasks: [...x.tasks, ...stageTasksFor(moved, area, stageId, x.tasks)] };
+        });
       },
       setMilestone(id: string, milestoneId: string, patch: Partial<MilestoneState>) {
         patchMatter(id, (m) => {
@@ -221,6 +258,7 @@ function useStoreValue() {
             { id: 'closed', name: 'Closed' },
           ],
           cadence: { soon: 10, followUp: 14 },
+          stageTasks: [],
         };
         setS((x) => ({ ...x, areas: [...x.areas, area] }));
         return id;
@@ -289,6 +327,7 @@ function useStoreValue() {
           };
           return {
             ...x,
+            tasks: [...x.tasks, ...stageTasksFor(matter, area, matter.stageId, x.tasks)],
             matters: [...x.matters, matter],
             pncs: x.pncs.map((q) => (q.id === id ? { ...q, stage: 'hired', matterId } : q)),
           };
@@ -337,14 +376,26 @@ function useStoreValue() {
         setS((x) => ({ ...x, billing: { ...x.billing, ...b } }));
       },
 
-      // ----- Reminders -----
-      completeReminder(id: string) {
-        setS((x) => ({ ...x, reminders: x.reminders.map((r) => (r.id === id ? { ...r, done: true, log: [...r.log, 'Marked done'] } : r)) }));
-      },
-      snoozeReminder(id: string, label: string, hours: number) {
+      // ----- Tasks -----
+      setTaskDone(id: string, done: boolean) {
         setS((x) => ({
           ...x,
-          reminders: x.reminders.map((r) =>
+          tasks: x.tasks.map((t) => (t.id === id ? { ...t, done, doneAt: done ? new Date().toISOString() : undefined, log: [...t.log, done ? 'Marked done' : 'Reopened'] } : t)),
+        }));
+      },
+      updateTask(id: string, patch: Partial<Task>, logLine?: string) {
+        setS((x) => ({ ...x, tasks: x.tasks.map((t) => (t.id === id ? { ...t, ...patch, log: logLine ? [...t.log, logLine] : t.log } : t)) }));
+      },
+      toggleChecklist(id: string, index: number) {
+        setS((x) => ({
+          ...x,
+          tasks: x.tasks.map((t) => (t.id === id ? { ...t, checklist: t.checklist.map((c, i) => (i === index ? { ...c, done: !c.done } : c)) } : t)),
+        }));
+      },
+      snoozeTask(id: string, label: string, hours: number) {
+        setS((x) => ({
+          ...x,
+          tasks: x.tasks.map((r) =>
             r.id === id
               ? {
                   ...r,
@@ -357,8 +408,8 @@ function useStoreValue() {
           ),
         }));
       },
-      addReminder(r: Omit<Reminder, 'id' | 'done' | 'snoozes' | 'log'>) {
-        setS((x) => ({ ...x, reminders: [...x.reminders, { ...r, id: newId('r'), done: false, snoozes: 0, log: [] }] }));
+      addTask(t: Omit<Task, 'id' | 'done' | 'snoozes' | 'log' | 'source' | 'createdAt'>) {
+        setS((x) => ({ ...x, tasks: [...x.tasks, { ...t, id: newId('task'), done: false, snoozes: 0, log: ['Created'], source: 'manual', createdAt: new Date().toISOString() }] }));
       },
 
       // ----- Messages -----

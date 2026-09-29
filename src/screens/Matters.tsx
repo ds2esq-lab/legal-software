@@ -87,12 +87,13 @@ export default function Matters() {
   const move = (m: Matter, stageId: string) => {
     if (m.stageId === stageId) return;
     const a = lookup.areaOf(m);
-    actions.updateMatter(m.id, { stageId });
+    actions.moveStage(m.id, stageId);
     const st = a.stages.find((x) => x.id === stageId)!;
+    const created = a.stageTasks.filter((t) => t.stageId === stageId).length;
     if (a.stages[a.stages.length - 1].id === stageId) {
       notify(`Moved to ${st.name}. Open the matter to finish the closeout checklist.`);
     } else {
-      notify(`Moved to ${st.name}. The client’s portal status updated.`);
+      notify(`Moved to ${st.name}.${created ? ` ${created} task${created === 1 ? '' : 's'} created.` : ''} The client’s portal updated.`);
     }
   };
 

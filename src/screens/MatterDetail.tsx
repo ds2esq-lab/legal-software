@@ -8,8 +8,9 @@ import { BallSelect, billingLabel, ContactPill, DateField, DuePill, fmtDate, Pag
 import Thread from '../Thread';
 import { NotesPanel, PartiesPanel } from '../people';
 import { ConflictBadge, ConflictPanel, uncheckedParties } from '../conflictPanel';
+import { NewTaskForm, TaskRow } from './Tasks';
 
-type Tab = 'timeline' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
+type Tab = 'timeline' | 'tasks' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify } = useStore();
@@ -256,9 +257,16 @@ export default function MatterDetail() {
   const client = lookup.clientOf(m);
   const stageIdx = area.stages.findIndex((x) => x.id === m.stageId);
   const closing = stageIdx >= area.stages.length - 2;
-  const upcoming = nextActions(m, area).slice(0, 3);
+  const upcoming = [...nextActions(m, area), ...s.tasks.filter((t) => t.matterId === m.id && !t.done).map((t) => ({ date: t.due.slice(0, 10), what: t.title, kind: 'task' as const }))].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 4);
   const docs = documents[m.id] ?? [];
   const up = (patch: Partial<Matter>) => actions.updateMatter(m.id, patch);
+  const openTasks = s.tasks.filter((t) => t.matterId === m.id && !t.done).sort((a, b) => a.due.localeCompare(b.due));
+  const doneTasks = s.tasks.filter((t) => t.matterId === m.id && t.done);
+  const moveTo = (stageId: string) => {
+    const created = area.stageTasks.filter((t) => t.stageId === stageId).length;
+    actions.moveStage(m.id, stageId);
+    notify(`Moved to ${area.stages.find((x) => x.id === stageId)?.name}.${created ? ` ${created} task${created === 1 ? '' : 's'} created.` : ''}`);
+  };
 
   return (
     <>
@@ -273,7 +281,7 @@ export default function MatterDetail() {
       <div className="stack" style={{ gap: 6 }}>
         <div className="stages" style={{ gridTemplateColumns: `repeat(${area.stages.length}, minmax(0, 1fr))` }} aria-label={`Stage ${stageIdx + 1} of ${area.stages.length}`}>
           {area.stages.map((x, i) => (
-            <button key={x.id} className={i <= stageIdx ? 'on' : ''} title={`Move to ${x.name}`} aria-label={`Move to ${x.name}`} onClick={() => { up({ stageId: x.id }); notify(`Moved to ${x.name}`); }} />
+            <button key={x.id} className={i <= stageIdx ? 'on' : ''} title={`Move to ${x.name}`} aria-label={`Move to ${x.name}`} onClick={() => moveTo(x.id)} />
           ))}
         </div>
         <div className="small muted">{area.stages.map((x, i) => (i === stageIdx ? `▸ ${x.name}` : x.name)).join('  ·  ')}</div>
@@ -285,7 +293,7 @@ export default function MatterDetail() {
           <div className="panel-body grid cols-2" style={{ gap: 12 }}>
             <div className="field">
               <label htmlFor="d-stage">Stage</label>
-              <select className="input" id="d-stage" value={m.stageId} onChange={(e) => up({ stageId: e.target.value })}>
+              <select className="input" id="d-stage" value={m.stageId} onChange={(e) => moveTo(e.target.value)}>
                 {area.stages.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select>
             </div>
@@ -331,7 +339,7 @@ export default function MatterDetail() {
               {upcoming.length === 0 && <li className="muted">Nothing dated. Set a suspense date so this doesn’t go quiet.</li>}
               {upcoming.map((a, i) => (
                 <li key={i} className="spread">
-                  <span>{a.what}<div className="small muted">{a.kind === 'suspense' ? 'Suspense' : a.kind === 'milestone' ? 'Milestone' : `Contact timer (${area.cadence.soon} days)`}</div></span>
+                  <span>{a.what}<div className="small muted">{a.kind === 'suspense' ? 'Suspense' : a.kind === 'milestone' ? 'Milestone' : a.kind === 'task' ? 'Task' : `Contact timer (${area.cadence.soon} days)`}</div></span>
                   <DuePill iso={a.date} />
                 </li>
               ))}
@@ -361,9 +369,10 @@ export default function MatterDetail() {
       {(closing || m.status === 'closed') && <Closeout m={m} />}
 
       <div className="tabs" role="tablist">
-        {(['timeline', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
+        {(['timeline', 'tasks', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
+            {t === 'tasks' && openTasks.length > 0 && <span className="num muted"> {openTasks.length}</span>}
             {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
             {t === 'conflicts' && (m.conflicts.length === 0 || uncheckedParties(m.conflicts, m.parties).length > 0) && <span className="dot-warn" aria-label="needs attention" />}
           </button>
@@ -372,6 +381,14 @@ export default function MatterDetail() {
 
       {tab === 'timeline' && <Timeline m={m} area={area} />}
       {tab === 'conflicts' && <ConflictPanel target={{ kind: 'matter', id: m.id }} parties={m.parties} checks={m.conflicts} />}
+      {tab === 'tasks' && (
+        <section className="panel">
+          <div className="panel-head"><h2>Tasks</h2><span className="small muted">{openTasks.length} open · stage tasks are created automatically (Settings → Practice areas)</span></div>
+          <div>{[...openTasks, ...doneTasks].map((t) => <TaskRow key={t.id} t={t} showMatter={false} />)}</div>
+          {openTasks.length + doneTasks.length === 0 && <p className="panel-body muted">No tasks yet.</p>}
+          <div style={{ borderTop: '1px solid var(--line)' }}><NewTaskForm matterId={m.id} /></div>
+        </section>
+      )}
       {tab === 'notes' && <NotesPanel target={{ kind: 'matter', id: m.id }} notes={m.notes} />}
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (

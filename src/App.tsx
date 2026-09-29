@@ -11,7 +11,7 @@ import MatterDetail from './screens/MatterDetail';
 import TimeBilling from './screens/TimeBilling';
 import Calendar from './screens/Calendar';
 import Scheduling from './screens/Scheduling';
-import Reminders from './screens/Reminders';
+import Tasks from './screens/Tasks';
 import Messages from './screens/Messages';
 import Phone from './screens/Phone';
 import Portal from './screens/Portal';
@@ -23,7 +23,7 @@ const NAV: { group?: string; id: Screen; label: string }[] = [
   { id: 'matters', label: 'Client matters' },
   { id: 'contacts', label: 'Contacts' },
   { id: 'conflicts', label: 'Conflict check' },
-  { id: 'reminders', label: 'Reminders' },
+  { id: 'tasks', label: 'Tasks' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'messages', label: 'Messages' },
   { group: 'Money', id: 'time', label: 'Time & billing' },
@@ -105,7 +105,7 @@ function CallBar() {
 
 export default function App() {
   const { screen, go, s, toast } = useStore();
-  const overdue = s.reminders.filter((r) => !r.done && new Date(r.due).getTime() < Date.now()).length;
+  const overdue = s.tasks.filter((r) => !r.done && r.assignee === 'me' && new Date(r.due).getTime() < Date.now()).length;
 
   const view = {
     today: <Today />,
@@ -119,7 +119,7 @@ export default function App() {
     time: <TimeBilling />,
     calendar: <Calendar />,
     scheduling: <Scheduling />,
-    reminders: <Reminders />,
+    tasks: <Tasks />,
     messages: <Messages />,
     phone: <Phone />,
     portal: <Portal />,
@@ -139,7 +139,7 @@ export default function App() {
               {n.group && <div className="nav-group">{n.group}</div>}
               <button aria-current={screen === n.id || (screen === 'matter' && n.id === 'matters') || (screen === 'pnc' && n.id === 'intake') || (screen === 'contact' && n.id === 'contacts') ? 'page' : undefined} onClick={() => go(n.id)}>
                 <span>{n.label}</span>
-                {n.id === 'reminders' && overdue > 0 && <span className="count">{overdue}</span>}
+                {n.id === 'tasks' && overdue > 0 && <span className="count">{overdue}</span>}
               </button>
             </div>
           ))}

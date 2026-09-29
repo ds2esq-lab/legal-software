@@ -16,7 +16,7 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Matter page | People and roles, notes, Whose Ball, last contact, suspense date, milestone timeline with editable due dates, closeout checklist |
 | Time & billing | Hourly, flat-fee and hybrid matters; configurable rounding (6-minute default) |
 | Scheduling | Calendly-style booking links; bookings create leads, events and conflict checks |
-| Reminders | Owner, nudge schedule, limited snoozes, escalation to a backup person |
+| Tasks | Owner, due date, checklist, nudges that escalate to a backup after three snoozes; court and statute deadlines can't be snoozed; stage tasks created automatically |
 | Calendar | Meetings, consults and court deadlines in one week view |
 | Messages | Firm channels plus a thread per matter; team-only vs client-visible |
 | Phone | Simulated VoIP: caller matched to matter, calls turned into time entries |

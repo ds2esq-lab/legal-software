@@ -125,18 +125,34 @@ export interface FlatFee {
   status: 'unbilled' | 'invoiced' | 'paid';
 }
 
-export interface Reminder {
+/**
+ * Something someone has to do. Tasks nudge until done: limited snoozes, then the backup person is
+ * brought in. Court and statute deadlines are tasks whose due date can never be snoozed or moved.
+ */
+export type TaskKind = 'internal' | 'client' | 'court' | 'statute';
+export interface ChecklistItem {
+  text: string;
+  done: boolean;
+}
+export interface Task {
   id: string;
   title: string;
   matterId?: string;
+  pncId?: string;
   due: string; // ISO datetime
   assignee: string;
   escalateTo?: string;
-  kind: 'court' | 'statute' | 'client' | 'internal';
+  kind: TaskKind;
   done: boolean;
+  doneAt?: string;
   snoozes: number;
   log: string[];
+  checklist: ChecklistItem[];
+  source: 'manual' | 'stage';
+  createdAt: string;
 }
+/** Kept for older code paths. */
+export type Reminder = Task;
 
 export interface CalEvent {
   id: string;
@@ -554,12 +570,28 @@ export const flatFees: FlatFee[] = [
   { id: 'f5', matterId: 'm2', description: 'Solo Signature (Trust) Plan', amount: 2950, status: 'unbilled' },
 ];
 
-export const reminders: Reminder[] = [
-  { id: 'r1', title: 'File petition response', matterId: 'm14', due: at(0, 17), assignee: 'me', escalateTo: 'marcus', kind: 'court', done: false, snoozes: 1, log: ['Reminded 7 days out', 'Reminded 3 days out', 'Snoozed 2h yesterday'] },
-  { id: 'r2', title: 'Creditor claim period ends', matterId: 'm8', due: at(38, 17), assignee: 'priya', escalateTo: 'me', kind: 'court', done: false, snoozes: 0, log: [] },
-  { id: 'r3', title: 'Send recorded deed to client', matterId: 'm19', due: at(2, 12), assignee: 'dana', kind: 'client', done: false, snoozes: 0, log: [] },
-  { id: 'r4', title: 'Chase signed beneficiary forms', matterId: 'm6', due: at(-1, 10), assignee: 'dana', escalateTo: 'me', kind: 'internal', done: false, snoozes: 3, log: ['Reminded', 'Snoozed 1d', 'Snoozed 1d', 'Snoozed 1d', 'Escalated to You'] },
+const tk = (t: Omit<Task, 'snoozes' | 'log' | 'checklist' | 'source' | 'createdAt' | 'done'> & Partial<Task>): Task => ({
+  done: false, snoozes: 0, log: [], checklist: [], source: 'manual', createdAt: at(-3), ...t,
+});
+const cl = (...items: [string, boolean][]) => items.map(([text, done]) => ({ text, done }));
+
+export const tasks: Task[] = [
+  tk({ id: 'r1', title: 'File petition response', matterId: 'm14', due: at(0, 17), assignee: 'me', escalateTo: 'marcus', kind: 'court', snoozes: 1, log: ['Nudged 7 days out', 'Nudged 3 days out', 'Snoozed 2h yesterday'] }),
+  tk({ id: 'r2', title: 'Creditor claim period ends', matterId: 'm8', due: at(38, 17), assignee: 'priya', escalateTo: 'me', kind: 'court' }),
+  tk({ id: 'r3', title: 'Mail recorded deed to client', matterId: 'm19', due: at(2, 12), assignee: 'dana', kind: 'client', source: 'stage' }),
+  tk({ id: 'r4', title: 'Chase signed beneficiary forms', matterId: 'm6', due: at(-1, 10), assignee: 'dana', escalateTo: 'me', kind: 'client', snoozes: 3, log: ['Nudged', 'Snoozed 1d', 'Snoozed 1d', 'Snoozed 1d', 'Escalated to You'] }),
+  tk({ id: 'r5', title: 'Prepare signing binder', matterId: 'm4', due: at(0, 12), assignee: 'dana', escalateTo: 'me', kind: 'internal', source: 'stage',
+    checklist: cl(['Originals printed', true], ['Witnesses and notary booked', true], ['Funding instructions letter', false], ['Binder assembled', false]) }),
+  tk({ id: 'r6', title: 'Draft documents', matterId: 'm2', due: at(2, 17), assignee: 'marcus', escalateTo: 'me', kind: 'internal', source: 'stage' }),
+  tk({ id: 'r7', title: 'Attorney review of drafts', matterId: 'm5', due: at(-1, 17), assignee: 'me', escalateTo: 'marcus', kind: 'internal', source: 'stage' }),
+  tk({ id: 'r8', title: 'Open estate bank account (EIN first)', matterId: 'm8', due: at(-12, 17), assignee: 'priya', kind: 'internal', source: 'stage', done: true, doneAt: at(-14, 15), log: ['Marked done'] }),
+  tk({ id: 'r9', title: 'Serve notice of hearing', matterId: 'm14', due: at(3, 17), assignee: 'dana', escalateTo: 'me', kind: 'court', source: 'stage' }),
+  tk({ id: 'r10', title: 'Statute of limitations: breach claim', matterId: 'm10', due: at(118, 9), assignee: 'me', kind: 'statute' }),
+  tk({ id: 'r11', title: 'Call Nadia Greer re: funding the trust', matterId: 'm1', due: at(5, 10), assignee: 'me', kind: 'client' }),
+  tk({ id: 'r12', title: 'Send engagement letter', pncId: 'p6', due: at(1, 12), assignee: 'dana', kind: 'client' }),
 ];
+/** Kept for older code paths. */
+export const reminders = tasks;
 
 export const events: CalEvent[] = [
   { id: 'e1', title: 'Consult: Pacheco', start: at(1, 14), minutes: 60, pncId: 'p4', kind: 'consult' },

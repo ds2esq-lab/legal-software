@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { INCREMENT_OPTIONS, type RoundingMode } from '../billing';
 import type { Cadences, Role, RoleSide } from '../data';
-import { newId, type DueRule, type Milestone, type PracticeArea, type Stage } from '../practice';
+import { newId, type DueRule, type Milestone, type PracticeArea, type Stage, type TaskTemplate } from '../practice';
+import { TEAM } from '../data';
 import { PageHead } from '../ui';
 
 type Section = 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
@@ -32,6 +33,67 @@ function AddRow({ placeholder, onAdd, id }: { placeholder: string; onAdd: (v: st
       <input className="input small" style={{ flex: '1 1 180px' }} id={id} aria-label={placeholder} placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />
       <button className="btn sm" type="submit">Add</button>
     </form>
+  );
+}
+
+function StageTasksEditor({ area, save }: { area: PracticeArea; save: (patch: Partial<PracticeArea>) => void }) {
+  const [stageId, setStageId] = useState(area.stages[0]?.id ?? '');
+  const set = (stageTasks: TaskTemplate[]) => save({ stageTasks });
+  const upd = (id: string, patch: Partial<TaskTemplate>) => set(area.stageTasks.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  return (
+    <section className="panel">
+      <div className="panel-head"><h2>Tasks created by stage</h2><span className="small muted">When a matter enters a stage, these tasks are created and assigned automatically.</span></div>
+      <ul className="list">
+        {area.stages.map((st) => {
+          const items = area.stageTasks.filter((t) => t.stageId === st.id);
+          if (!items.length) return null;
+          return (
+            <li key={st.id} className="stack" style={{ display: 'flex', gap: 8 }}>
+              <strong className="small">{st.name}</strong>
+              {items.map((t) => (
+                <div key={t.id} className="stack" style={{ gap: 4, width: '100%' }}>
+                  <div className="tt-row">
+                    <input className="input small" id={`tt-title-${t.id}`} aria-label="Task" value={t.title} onChange={(e) => upd(t.id, { title: e.target.value })} />
+                    <select className="input small tight" id={`tt-who-${t.id}`} aria-label="Assign to" value={t.assignTo} onChange={(e) => upd(t.id, { assignTo: e.target.value })}>
+                      <option value="owner">Responsible attorney</option>
+                      <option value="ball">Whoever has the ball</option>
+                      {TEAM.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                      <span className="small muted">due in</span>
+                      <input className="input small tight num" style={{ width: 56 }} type="number" min={0} id={`tt-n-${t.id}`} aria-label="Due in" value={t.dueIn} onChange={(e) => upd(t.id, { dueIn: Math.max(0, Number(e.target.value) || 0) })} />
+                      <select className="input small tight" id={`tt-u-${t.id}`} aria-label="Unit" value={t.dueUnit} onChange={(e) => upd(t.id, { dueUnit: e.target.value as TaskTemplate['dueUnit'] })}>
+                        <option value="workdays">workdays</option>
+                        <option value="days">days</option>
+                      </select>
+                    </span>
+                    <button className="btn sm ghost icon danger" aria-label={`Delete ${t.title}`} onClick={() => set(area.stageTasks.filter((x) => x.id !== t.id))}>×</button>
+                  </div>
+                  <div className="row" style={{ gap: 6 }}>
+                    <select className="input small tight" id={`tt-k-${t.id}`} aria-label="Type" value={t.kind} onChange={(e) => upd(t.id, { kind: e.target.value as TaskTemplate['kind'] })}>
+                      <option value="internal">Task</option>
+                      <option value="client">Client follow-up</option>
+                      <option value="court">Court deadline</option>
+                    </select>
+                    <input className="input small" style={{ flex: '1 1 240px' }} id={`tt-cl-${t.id}`} aria-label="Checklist" placeholder="Checklist items, separated by commas (optional)" value={t.checklist.join(', ')} onChange={(e) => upd(t.id, { checklist: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+                  </div>
+                </div>
+              ))}
+            </li>
+          );
+        })}
+        {area.stageTasks.length === 0 && <li className="muted small">No automatic tasks yet.</li>}
+      </ul>
+      <div className="panel-body row" style={{ gap: 6 }}>
+        <span className="small">Add a task to</span>
+        <select className="input small tight" id="tt-stage" aria-label="Stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
+          {area.stages.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+        </select>
+        <div style={{ flex: '1 1 240px' }}>
+          <AddRow id="add-tt" placeholder="Task, e.g. Order certified copies" onAdd={(title) => set([...area.stageTasks, { id: newId('tt'), stageId, title, assignTo: 'owner', dueIn: 3, dueUnit: 'workdays', kind: 'internal', checklist: [] }])} />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -89,7 +151,7 @@ function AreaEditor({ area }: { area: PracticeArea }) {
                 aria-label={`Delete ${st.name}`}
                 disabled={inStage(st.id) > 0 || area.stages.length <= 2}
                 title={inStage(st.id) > 0 ? 'Move the matters in this stage first' : 'Delete stage'}
-                onClick={() => setStages(area.stages.filter((x) => x.id !== st.id))}
+                onClick={() => save({ stages: area.stages.filter((x) => x.id !== st.id), stageTasks: area.stageTasks.filter((t) => t.stageId !== st.id) })}
               >
                 ×
               </button>
@@ -98,6 +160,8 @@ function AreaEditor({ area }: { area: PracticeArea }) {
         </ul>
         <div className="panel-body"><AddRow id="add-stage" placeholder="New stage name" onAdd={(name) => { const stages = [...area.stages]; stages.splice(stages.length - 1, 0, { id: newId('st'), name }); setStages(stages); }} /></div>
       </section>
+
+      <StageTasksEditor area={area} save={save} />
 
       <section className="panel">
         <div className="panel-head"><h2>Milestones & deadline rules</h2><span className="small muted">The dated steps of every matter. A rule sets the due date automatically; any matter can override it.</span></div>
