@@ -1,144 +1,151 @@
+import { useState } from 'react';
 import { useStore } from '../store';
-import { money, billedMinutes, formatHours } from '../billing';
-import { entryValue } from '../calc';
-import { daysFromToday, fmtTime, MatterLink, PageHead, relDay } from '../ui';
+import { TEAM, type Matter } from '../data';
+import { dueMilestones } from '../calc';
+import { nextTouch } from '../intake';
+import { addDays, contactState, todayISO } from '../practice';
+import { ContactPill, DuePill, fmtTime, PageHead, Person, relDay } from '../ui';
+
+interface Item {
+  key: string;
+  date: string;
+  kind: 'Milestone' | 'Suspense' | 'Contact' | 'Deadline';
+  what: string;
+  m: Matter;
+}
 
 export default function Today() {
   const { s, actions, lookup, go, notify } = useStore();
-  const now = Date.now();
-  const open = s.reminders.filter((r) => !r.done);
-  const urgent = open
-    .filter((r) => daysFromToday(r.due) <= 2)
-    .sort((a, b) => a.due.localeCompare(b.due));
-  const overdue = open.filter((r) => new Date(r.due).getTime() < now).length;
-  const todayEvents = s.events.filter((e) => daysFromToday(e.start) === 0).sort((a, b) => a.start.localeCompare(b.start));
+  const [who, setWho] = useState('me');
+  const today = todayISO();
+  const soonWindow = addDays(today, 2);
 
-  const weekMinutes = s.timeEntries
-    .filter((t) => daysFromToday(t.date) > -7 && t.user === 'me')
-    .reduce((n, t) => n + billedMinutes(t.actualMinutes, s.billing), 0);
-  const unbilled = s.timeEntries
-    .filter((t) => !t.invoiced)
-    .reduce((n, t) => n + entryValue(t, lookup.matter(t.matterId), s.billing), 0)
-    + s.flatFees.filter((f) => f.status === 'unbilled').reduce((n, f) => n + f.amount, 0);
-  const consults = s.events.filter((e) => e.kind === 'consult' && daysFromToday(e.start) >= 0 && daysFromToday(e.start) < 7).length;
+  // One queue from every source of dates: milestones, suspense dates, contact timers, reminders.
+  const items: Item[] = [];
+  for (const m of s.matters) {
+    if (who !== 'all' && m.ball !== who && m.owner !== who) continue;
+    const area = lookup.areaOf(m);
+    for (const d of dueMilestones(m, area)) if (d.date <= soonWindow) items.push({ key: `${m.id}-ms-${d.milestoneId}`, date: d.date, kind: 'Milestone', what: `${d.name} due`, m });
+    if (m.suspense && m.suspense <= soonWindow) items.push({ key: `${m.id}-susp`, date: m.suspense, kind: 'Suspense', what: m.suspenseNote || 'Suspense date', m });
+    if (contactState(m.lastContact, area) === 'followup') items.push({ key: `${m.id}-contact`, date: addDays(m.lastContact!, area.cadence.followUp), kind: 'Contact', what: 'Client follow-up needed', m });
+  }
+  for (const r of s.reminders) {
+    if (r.done || !r.matterId || (who !== 'all' && r.assignee !== who)) continue;
+    const m = lookup.matter(r.matterId);
+    if (m && r.due.slice(0, 10) <= soonWindow) items.push({ key: `rem-${r.id}`, date: r.due.slice(0, 10), kind: 'Deadline', what: r.title, m });
+  }
+  items.sort((a, b) => a.date.localeCompare(b.date));
+  const late = items.filter((i) => i.date < today).length;
+
+  const allFollowUps = s.matters.filter((m) => contactState(m.lastContact, lookup.areaOf(m)) === 'followup').length;
+  const lateMilestones = s.matters.reduce((n, m) => n + dueMilestones(m, lookup.areaOf(m)).filter((d) => d.late).length, 0);
+  const touchesDue = s.pncs.filter((p) => { const t = nextTouch(p, s.cadences); return t && t.due <= today; }).length;
+  const todayEvents = s.events.filter((e) => e.start.slice(0, 10) === today || relDay(e.start) === 'Today').sort((a, b) => a.start.localeCompare(b.start));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
     <>
-      <PageHead
-        title={greeting}
-        sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '. Here is what needs you today.'}
-      />
+      <PageHead title={greeting} sub={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '. Everything with a date on it, in one list.'}>
+        <select className="input" style={{ width: 'auto' }} id="who" aria-label="Whose list" value={who} onChange={(e) => setWho(e.target.value)}>
+          {TEAM.map((t) => <option key={t.id} value={t.id}>{t.id === 'me' ? 'My list' : `${t.name}’s list`}</option>)}
+          <option value="all">Whole firm</option>
+        </select>
+      </PageHead>
 
       <div className="stats">
-        <div className="stat">
-          <span className="label">Overdue / due in 48h</span>
-          <span className="v" style={{ color: overdue ? 'var(--danger)' : undefined }}>
-            {overdue} / {urgent.length}
-          </span>
-        </div>
-        <div className="stat">
-          <span className="label">My hours, last 7 days</span>
-          <span className="v">{formatHours(weekMinutes, s.billing)}</span>
-        </div>
-        <div className="stat">
-          <span className="label">Unbilled work</span>
-          <span className="v">{money(unbilled)}</span>
-        </div>
-        <div className="stat">
-          <span className="label">Consults this week</span>
-          <span className="v">{consults}</span>
-        </div>
+        <button className="stat" onClick={() => go('matters')}>
+          <span className="label">Clients needing follow-up</span>
+          <span className="v" style={{ color: allFollowUps ? 'var(--danger)' : undefined }}>{allFollowUps}</span>
+        </button>
+        <button className="stat" onClick={() => go('matters')}>
+          <span className="label">Late milestones</span>
+          <span className="v" style={{ color: lateMilestones ? 'var(--danger)' : undefined }}>{lateMilestones}</span>
+        </button>
+        <button className="stat" onClick={() => go('intake')}>
+          <span className="label">Intake touches due</span>
+          <span className="v">{touchesDue}</span>
+        </button>
+        <button className="stat" onClick={() => go('matters')}>
+          <span className="label">Open matters</span>
+          <span className="v">{s.matters.length}</span>
+        </button>
       </div>
 
       <div className="grid cols-main">
         <section className="panel">
           <div className="panel-head">
-            <h2>Needs attention</h2>
-            <button className="btn sm ghost" onClick={() => go('reminders')}>All reminders →</button>
-          </div>
-          <div>
-            {urgent.length === 0 && <p className="panel-body muted">Nothing due in the next 48 hours.</p>}
-            {urgent.map((r) => {
-              const late = new Date(r.due).getTime() < now;
-              const n = daysFromToday(r.due);
-              return (
-                <div key={r.id} className={`rem ${late ? 'overdue' : n <= 1 ? 'soon' : ''}`}>
-                  <span className="stripe" />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600 }}>{r.title}</div>
-                    <div className="small muted row" style={{ gap: 6 }}>
-                      <MatterLink id={r.matterId} />
-                      <span>·</span>
-                      <span style={{ color: late ? 'var(--danger)' : undefined }}>
-                        {late ? 'Overdue, was due ' : 'Due '}
-                        {relDay(r.due)} {fmtTime(r.due)}
-                      </span>
-                      {r.kind === 'court' && <span className="pill danger">Court deadline</span>}
-                    </div>
-                  </div>
-                  <button
-                    className="btn sm"
-                    onClick={() => {
-                      actions.completeReminder(r.id);
-                      notify('Marked done and logged on the matter');
-                    }}
-                  >
-                    Done
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Today’s schedule</h2>
-            <button className="btn sm ghost" onClick={() => go('calendar')}>Week →</button>
+            <h2>Due now and next 2 days</h2>
+            <span className="small muted">{items.length} item{items.length === 1 ? '' : 's'}{late ? ` · ${late} late` : ''}</span>
           </div>
           <ul className="list">
-            {todayEvents.length === 0 && <li className="muted">No meetings today.</li>}
-            {todayEvents.map((e) => (
-              <li key={e.id}>
-                <span className="num small muted" style={{ width: 64, flex: 'none' }}>{fmtTime(e.start)}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 500 }}>{e.title}</div>
-                  <div className="small">
-                    <MatterLink id={e.matterId} /> <span className="muted">· {e.minutes} min</span>
+            {items.length === 0 && <li className="muted">Nothing due. Check the board for matters without a suspense date.</li>}
+            {items.map((i) => (
+              <li key={i.key} className="queue-row">
+                <DuePill iso={i.date} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div><strong style={{ fontWeight: 500 }}>{i.what}</strong> <span className="pill">{i.kind}</span></div>
+                  <div className="small muted row" style={{ gap: 6 }}>
+                    <button className="link" onClick={() => go('matter', i.m.id)}>{i.m.name}</button>
+                    <span>·</span>
+                    <span>{lookup.areaOf(i.m).name}</span>
+                    <span>·</span>
+                    <span className="row" style={{ gap: 4 }}>Ball: <Person id={i.m.ball} showName /></span>
                   </div>
                 </div>
+                {i.kind === 'Contact' && <button className="btn sm" onClick={() => { actions.logContact(i.m.id); notify('Contact logged'); }}>Logged contact</button>}
+                {i.kind === 'Milestone' && <button className="btn sm" onClick={() => go('matter', i.m.id)}>Open</button>}
+                {i.kind === 'Suspense' && (
+                  <button className="btn sm" onClick={() => { actions.updateMatter(i.m.id, { suspense: addDays(today, 7) }); notify('Suspense moved out one week'); }}>+1 week</button>
+                )}
+                {i.kind === 'Deadline' && <button className="btn sm" onClick={() => go('reminders')}>Open</button>}
               </li>
             ))}
           </ul>
         </section>
-      </div>
 
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Try the connected pieces</h2>
-          <span className="small muted">Each one writes to the same matter record</span>
+        <div className="stack" style={{ gap: 16 }}>
+          <section className="panel">
+            <div className="panel-head"><h2>Today’s schedule</h2><button className="btn sm ghost" onClick={() => go('calendar')}>Week →</button></div>
+            <ul className="list">
+              {todayEvents.length === 0 && <li className="muted">No meetings today.</li>}
+              {todayEvents.map((e) => (
+                <li key={e.id}>
+                  <span className="num small muted" style={{ width: 64, flex: 'none' }}>{fmtTime(e.start)}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{e.title}</div>
+                    <div className="small muted">{e.minutes} min</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="panel">
+            <div className="panel-head"><h2>Longest without contact</h2></div>
+            <ul className="list">
+              {[...s.matters]
+                .filter((m) => m.lastContact)
+                .sort((a, b) => a.lastContact!.localeCompare(b.lastContact!))
+                .slice(0, 5)
+                .map((m) => (
+                  <li key={m.id} className="spread">
+                    <button className="link" onClick={() => go('matter', m.id)}>{m.name}</button>
+                    <ContactPill m={m} />
+                  </li>
+                ))}
+            </ul>
+          </section>
+          <section className="panel">
+            <div className="panel-head"><h2>Try it</h2></div>
+            <div className="panel-body stack" style={{ gap: 8 }}>
+              <button className="btn" disabled={!!s.activeCall} onClick={() => actions.simulateIncomingCall()}>Simulate incoming client call</button>
+              <button className="btn" onClick={() => go('intake')}>Work the intake queue</button>
+              <button className="btn" onClick={() => go('settings')}>Edit stages & deadline rules</button>
+            </div>
+          </section>
         </div>
-        <div className="panel-body grid cols-3">
-          <div className="stack">
-            <strong>Phone system</strong>
-            <span className="small muted">A client calls. The number is matched to their matter, and hanging up drafts a time entry.</span>
-            <div><button className="btn primary" disabled={!!s.activeCall} onClick={() => actions.simulateIncomingCall()}>Simulate incoming call</button></div>
-          </div>
-          <div className="stack">
-            <strong>Scheduling</strong>
-            <span className="small muted">A prospect books a consult from your public link and lands in Intake with a conflict check queued.</span>
-            <div><button className="btn" onClick={() => go('scheduling')}>Open booking page</button></div>
-          </div>
-          <div className="stack">
-            <strong>Client portal</strong>
-            <span className="small muted">See exactly what your client sees: status, messages, documents and invoices.</span>
-            <div><button className="btn" onClick={() => go('portal')}>View as client</button></div>
-          </div>
-        </div>
-      </section>
+      </div>
     </>
   );
 }

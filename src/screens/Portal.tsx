@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { documents, STAGES, teamName } from '../data';
+import { documents, teamName } from '../data';
 import { billedMinutes, money } from '../billing';
 import { hourlyRate } from '../calc';
 import { fmtTime, PageHead, relDay } from '../ui';
@@ -11,7 +11,9 @@ export default function Portal() {
   const [text, setText] = useState('');
   const m = lookup.matter(sel) ?? s.matters[0];
   const client = lookup.clientOf(m);
-  const stageIdx = STAGES.findIndex((x) => x.id === m.stage);
+  const area = lookup.areaOf(m);
+  const stages = area.stages;
+  const stageIdx = Math.max(0, stages.findIndex((x) => x.id === m.stageId));
   const msgs = s.messages.filter((x) => x.channel === m.id && x.clientVisible).sort((a, b) => a.at.localeCompare(b.at));
   const docs = (documents[m.id] ?? []).filter((d) => d.shared);
   const fees = s.flatFees.filter((f) => f.matterId === m.id && f.status !== 'unbilled');
@@ -37,10 +39,10 @@ export default function Portal() {
           <section className="panel">
             <div className="panel-body stack">
               <div className="label">{m.name}</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600 }}>{STAGES[stageIdx].clientLabel}</div>
-              <div className="stages">{STAGES.map((x, i) => <div key={x.id} className={i <= stageIdx ? 'on' : ''} />)}</div>
-              <div className="small muted">Step {stageIdx + 1} of {STAGES.length}. Handled by {m.owner === 'me' ? 'your lead attorney' : teamName(m.owner)}.</div>
-              {m.stage === 'waiting' && (
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600 }}>{stages[stageIdx].name}</div>
+              <div className="stages" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>{stages.map((x, i) => <div key={x.id} className={i <= stageIdx ? 'on' : ''} />)}</div>
+              <div className="small muted">Step {stageIdx + 1} of {stages.length}. Handled by {m.owner === 'me' ? 'your lead attorney' : teamName(m.owner)}.</div>
+              {m.ball === 'client' && (
                 <div className="banner warn">We need something from you to keep moving. See the latest message below.</div>
               )}
             </div>

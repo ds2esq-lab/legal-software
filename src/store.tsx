@@ -1,10 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
-import type { CalEvent, CallLog, Matter, Message, Reminder, Stage, TimeEntry } from './data';
+import type { CalEvent, CallLog, Cadences, Matter, Message, Pnc, Reminder, TimeEntry } from './data';
 import { DEFAULT_BILLING, type BillingSettings } from './billing';
+import { DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
 export type Screen =
   | 'today'
+  | 'intake'
   | 'matters'
   | 'matter'
   | 'time'
@@ -30,7 +32,10 @@ interface ActiveCall {
 }
 
 interface State {
+  areas: PracticeArea[];
+  cadences: Cadences;
   matters: Matter[];
+  pncs: Pnc[];
   clients: seed.Client[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
@@ -44,33 +49,55 @@ interface State {
   activeCall: ActiveCall | null;
 }
 
-const initial: State = {
-  matters: seed.matters,
-  clients: seed.clients,
-  timeEntries: seed.timeEntries,
-  flatFees: seed.flatFees,
-  reminders: seed.reminders,
-  events: seed.events,
-  messages: seed.messages,
-  calls: seed.calls,
-  eventTypes: seed.eventTypes,
-  billing: DEFAULT_BILLING,
-  timer: null,
-  activeCall: null,
-};
+// Firm settings survive a reload in this browser. Matter data is sample data and resets.
+const CONFIG_KEY = 'docket.config.v2';
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing'>> {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
 
-let idCounter = 1000;
-const newId = (p: string) => `${p}${++idCounter}`;
+function initialState(): State {
+  const cfg = loadConfig();
+  return {
+    areas: cfg.areas ?? DEFAULT_AREAS,
+    cadences: cfg.cadences ?? seed.DEFAULT_CADENCES,
+    billing: cfg.billing ?? DEFAULT_BILLING,
+    matters: seed.matters,
+    pncs: seed.pncs,
+    clients: seed.clients,
+    timeEntries: seed.timeEntries,
+    flatFees: seed.flatFees,
+    reminders: seed.reminders,
+    events: seed.events,
+    messages: seed.messages,
+    calls: seed.calls,
+    eventTypes: seed.eventTypes,
+    timer: null,
+    activeCall: null,
+  };
+}
 
 function useStoreValue() {
-  const [s, setS] = useState<State>(initial);
+  const [s, setS] = useState<State>(initialState);
   const [screen, setScreen] = useState<Screen>('today');
-  const [matterId, setMatterId] = useState<string>('m4');
+  const [matterId, setMatterId] = useState<string>('m1');
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing }));
+    } catch {
+      /* storage unavailable: settings last for this visit only */
+    }
+  }, [s.areas, s.cadences, s.billing]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 3200);
+    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 3400);
   }, []);
 
   const go = useCallback((sc: Screen, mId?: string) => {
@@ -79,18 +106,111 @@ function useStoreValue() {
     window.scrollTo({ top: 0 });
   }, []);
 
-  const actions = useMemo(
-    () => ({
-      moveMatter(id: string, stage: Stage) {
-        setS((x) => ({ ...x, matters: x.matters.map((m) => (m.id === id ? { ...m, stage } : m)) }));
+  const actions = useMemo(() => {
+    const patchMatter = (id: string, f: (m: Matter) => Matter) =>
+      setS((x) => ({ ...x, matters: x.matters.map((m) => (m.id === id ? f(m) : m)) }));
+
+    return {
+      // ----- Matters -----
+      updateMatter(id: string, patch: Partial<Matter>) {
+        patchMatter(id, (m) => ({ ...m, ...patch }));
       },
+      setMilestone(id: string, milestoneId: string, patch: Partial<MilestoneState>) {
+        patchMatter(id, (m) => {
+          const cur: MilestoneState = { ...m.milestones[milestoneId], ...patch };
+          if (!cur.done) delete cur.done;
+          if (!cur.due) delete cur.due;
+          return { ...m, milestones: { ...m.milestones, [milestoneId]: cur } };
+        });
+      },
+      logContact(id: string) {
+        patchMatter(id, (m) => ({ ...m, lastContact: todayISO() }));
+      },
+
+      // ----- Practice areas (settings) -----
+      saveArea(area: PracticeArea) {
+        setS((x) => ({ ...x, areas: x.areas.map((a) => (a.id === area.id ? area : a)) }));
+      },
+      addArea(name: string): string {
+        const id = `${slug(name)}-${Date.now().toString(36)}`;
+        const area: PracticeArea = {
+          id,
+          name,
+          planLabel: 'Type',
+          planTypes: [],
+          stages: [
+            { id: 'info-gathering', name: 'Info Gathering' },
+            { id: 'in-progress', name: 'In Progress' },
+            { id: 'ready-to-close', name: 'Ready to Close' },
+            { id: 'closeout', name: 'Closeout' },
+          ],
+          milestones: [
+            { id: 'engaged', name: 'Engaged' },
+            { id: 'closed', name: 'Closed' },
+          ],
+          cadence: { soon: 10, followUp: 14 },
+        };
+        setS((x) => ({ ...x, areas: [...x.areas, area] }));
+        return id;
+      },
+      deleteArea(id: string) {
+        setS((x) => (x.matters.some((m) => m.areaId === id) ? x : { ...x, areas: x.areas.filter((a) => a.id !== id) }));
+      },
+      resetAreas() {
+        setS((x) => ({ ...x, areas: DEFAULT_AREAS, cadences: seed.DEFAULT_CADENCES }));
+      },
+      setCadences(c: Cadences) {
+        setS((x) => ({ ...x, cadences: c }));
+      },
+
+      // ----- Intake -----
+      updatePnc(id: string, patch: Partial<Pnc>) {
+        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+      },
+      markTouch(id: string, key: string) {
+        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, touches: { ...p.touches, [key]: todayISO() } } : p)) }));
+      },
+      addPnc(p: Omit<Pnc, 'id' | 'touches'>) {
+        setS((x) => ({ ...x, pncs: [{ ...p, id: newId('p'), touches: {} }, ...x.pncs] }));
+      },
+      /** Hired: the prospect becomes a client and a matter, with nothing retyped. */
+      hirePnc(id: string, areaId: string, planType: string | undefined, matterId: string) {
+        setS((x) => {
+          const p = x.pncs.find((q) => q.id === id);
+          const area = x.areas.find((a) => a.id === areaId);
+          if (!p || !area) return x;
+          const clientId = newId('c');
+          const engaged = area.milestones[0];
+          const matter: Matter = {
+            id: matterId,
+            number: `2026-${String(x.matters.length + 101).padStart(4, '0')}`,
+            name: `${p.name.split(',')[0]} ${area.name}`,
+            clientId,
+            areaId,
+            stageId: area.stages[0].id,
+            planType,
+            owner: p.owner === 'dana' || p.owner === 'priya' ? 'me' : p.owner,
+            ball: 'client',
+            billing: { kind: 'flat', amount: 0 },
+            priority: false,
+            lastContact: todayISO(),
+            milestones: engaged ? { [engaged.id]: { done: todayISO() } } : {},
+            stalled: false,
+            opened: todayISO(),
+          };
+          return {
+            ...x,
+            clients: [...x.clients, { id: clientId, name: p.name, email: '', phone: p.phone }],
+            matters: [...x.matters, matter],
+            pncs: x.pncs.map((q) => (q.id === id ? { ...q, stage: 'hired', matterId } : q)),
+          };
+        });
+      },
+
+      // ----- Time & billing -----
       startTimer(matterId: string, description = '') {
         setS((x) => ({ ...x, timer: { matterId, description, startedAt: Date.now() } }));
       },
-      setTimerDescription(description: string) {
-        setS((x) => (x.timer ? { ...x, timer: { ...x.timer, description } } : x));
-      },
-      /** Stops the timer and saves an entry. `demoMinutes` fast-forwards the clock for the prototype. */
       stopTimer(demoMinutes?: number) {
         setS((x) => {
           if (!x.timer) return x;
@@ -98,7 +218,7 @@ function useStoreValue() {
           const entry: TimeEntry = {
             id: newId('t'),
             matterId: x.timer.matterId,
-            date: new Date().toISOString().slice(0, 10),
+            date: todayISO(),
             actualMinutes: actual,
             description: x.timer.description || 'Untitled work',
             user: 'me',
@@ -128,6 +248,8 @@ function useStoreValue() {
       setBilling(b: Partial<BillingSettings>) {
         setS((x) => ({ ...x, billing: { ...x.billing, ...b } }));
       },
+
+      // ----- Reminders -----
       completeReminder(id: string) {
         setS((x) => ({ ...x, reminders: x.reminders.map((r) => (r.id === id ? { ...r, done: true, log: [...r.log, 'Marked done'] } : r)) }));
       },
@@ -150,55 +272,35 @@ function useStoreValue() {
       addReminder(r: Omit<Reminder, 'id' | 'done' | 'snoozes' | 'log'>) {
         setS((x) => ({ ...x, reminders: [...x.reminders, { ...r, id: newId('r'), done: false, snoozes: 0, log: [] }] }));
       },
+
+      // ----- Messages -----
       postMessage(channel: string, text: string, clientVisible: boolean, author = 'me') {
         setS((x) => ({
           ...x,
           messages: [...x.messages, { id: newId('msg'), channel, author, text, at: new Date().toISOString(), clientVisible }],
         }));
       },
-      /** A public booking from the scheduling page. Prospects become leads in Intake. */
-      book(typeId: string, start: string, name: string, answers: string[]) {
+
+      // ----- Scheduling -----
+      /** A public booking. Prospects land in Intake with the consult on the calendar. */
+      book(typeId: string, start: string, name: string, phone: string, answers: string[]) {
         setS((x) => {
           const type = x.eventTypes.find((t) => t.id === typeId)!;
-          const clientId = newId('c');
-          const matterId = newId('m');
           const isProspect = type.who === 'prospects';
-          const clients = isProspect ? [...x.clients, { id: clientId, name, email: '', phone: '' }] : x.clients;
-          const matters: Matter[] = isProspect
-            ? [
-                ...x.matters,
-                {
-                  id: matterId,
-                  number: '—',
-                  name: `${name}: ${answers[0] || 'new inquiry'}`,
-                  clientId,
-                  area: 'Unassigned',
-                  stage: 'consult',
-                  owner: 'me',
-                  billing: { kind: 'hourly', rate: 350 },
-                  priority: 'normal',
-                  nextDeadline: start.slice(0, 10),
-                  opened: new Date().toISOString().slice(0, 10),
-                },
-              ]
-            : x.matters;
-          const ev: CalEvent = {
-            id: newId('e'),
-            title: `${isProspect ? 'Consult' : type.name}: ${name}`,
-            start,
-            minutes: type.minutes,
-            matterId: isProspect ? matterId : undefined,
-            kind: 'consult',
-          };
+          const pncId = newId('p');
+          const pncs: Pnc[] = isProspect
+            ? [{ id: pncId, name, phone, source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: start, touches: {}, owner: 'me' }, ...x.pncs]
+            : x.pncs;
+          const ev: CalEvent = { id: newId('e'), title: `${isProspect ? 'Consult' : type.name}: ${name.split(',')[0]}`, start, minutes: type.minutes, pncId: isProspect ? pncId : undefined, kind: 'consult' };
           const msg: Message = {
             id: newId('msg'),
             channel: 'intake',
             author: 'system',
-            text: `${name} booked "${type.name}". ${isProspect ? 'Lead created in Intake; conflict check queued' : 'Added to calendar'}.${answers[1] ? ` Parties named: ${answers[1]}.` : ''}`,
+            text: `${name} booked "${type.name}". ${isProspect ? 'Added to Intake as Consult scheduled; conflict check queued' : 'Added to calendar'}.${answers[1] ? ` Others named: ${answers[1]}.` : ''}`,
             at: new Date().toISOString(),
             clientVisible: false,
           };
-          return { ...x, clients, matters, events: [...x.events, ev], messages: [...x.messages, msg] };
+          return { ...x, pncs, events: [...x.events, ev], messages: [...x.messages, msg] };
         });
       },
       toggleEventType(id: string) {
@@ -207,66 +309,48 @@ function useStoreValue() {
       updateEventType(id: string, patch: Partial<seed.EventType>) {
         setS((x) => ({ ...x, eventTypes: x.eventTypes.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
       },
+
+      // ----- Phone -----
       simulateIncomingCall() {
-        setS((x) => ({
-          ...x,
-          activeCall: { contact: 'Coastal Roofing Co.', number: '(555) 602-7731', matterId: 'm4', startedAt: Date.now() },
-        }));
+        setS((x) => {
+          const m = x.matters.find((q) => q.id === 'm8') ?? x.matters[0];
+          const c = x.clients.find((q) => q.id === m.clientId)!;
+          return { ...x, activeCall: { contact: c.name, number: c.phone, matterId: m.id, startedAt: Date.now() } };
+        });
       },
-      /** Ends the call, logs it and drafts a time entry. `demoSeconds` stands in for real call length. */
+      /** Ends the call, logs it, drafts a time entry and counts as client contact. */
       endCall(demoSeconds = 440) {
         setS((x) => {
           if (!x.activeCall) return x;
           const c = x.activeCall;
-          const log: CallLog = { id: newId('p'), matterId: c.matterId, contact: c.contact, number: c.number, direction: 'in', at: new Date().toISOString(), seconds: demoSeconds, logged: !!c.matterId };
-          const entries = c.matterId
-            ? [
-                {
-                  id: newId('t'),
-                  matterId: c.matterId,
-                  date: new Date().toISOString().slice(0, 10),
-                  actualMinutes: Math.ceil(demoSeconds / 60),
-                  description: `Phone call with ${c.contact}`,
-                  user: 'me',
-                  billable: true,
-                  invoiced: false,
-                  source: 'call' as const,
-                },
-                ...x.timeEntries,
-              ]
+          const log: CallLog = { id: newId('c'), matterId: c.matterId, contact: c.contact, number: c.number, direction: 'in', at: new Date().toISOString(), seconds: demoSeconds, logged: !!c.matterId };
+          const entries: TimeEntry[] = c.matterId
+            ? [{ id: newId('t'), matterId: c.matterId, date: todayISO(), actualMinutes: Math.ceil(demoSeconds / 60), description: `Phone call with ${c.contact}`, user: 'me', billable: true, invoiced: false, source: 'call' }, ...x.timeEntries]
             : x.timeEntries;
-          return { ...x, activeCall: null, calls: [log, ...x.calls], timeEntries: entries };
+          const matters = c.matterId ? x.matters.map((m) => (m.id === c.matterId ? { ...m, lastContact: todayISO() } : m)) : x.matters;
+          return { ...x, activeCall: null, calls: [log, ...x.calls], timeEntries: entries, matters };
         });
       },
       logCall(id: string, matterId: string) {
         setS((x) => {
           const call = x.calls.find((c) => c.id === id);
           if (!call) return x;
-          const entry: TimeEntry = {
-            id: newId('t'),
-            matterId,
-            date: call.at.slice(0, 10),
-            actualMinutes: Math.ceil(call.seconds / 60),
-            description: `Phone call with ${call.contact}`,
-            user: 'me',
-            billable: true,
-            invoiced: false,
-            source: 'call',
-          };
+          const entry: TimeEntry = { id: newId('t'), matterId, date: call.at.slice(0, 10), actualMinutes: Math.ceil(call.seconds / 60), description: `Phone call with ${call.contact}`, user: 'me', billable: true, invoiced: false, source: 'call' };
           return { ...x, calls: x.calls.map((c) => (c.id === id ? { ...c, matterId, logged: true } : c)), timeEntries: [entry, ...x.timeEntries] };
         });
       },
-    }),
-    [],
-  );
+    };
+  }, []);
 
   const lookup = useMemo(
     () => ({
       matter: (id: string) => s.matters.find((m) => m.id === id),
       client: (id: string) => s.clients.find((c) => c.id === id),
       clientOf: (m: Matter) => s.clients.find((c) => c.id === m.clientId),
+      area: (id: string) => s.areas.find((a) => a.id === id),
+      areaOf: (m: Matter) => s.areas.find((a) => a.id === m.areaId) ?? s.areas[0],
     }),
-    [s.matters, s.clients],
+    [s.matters, s.clients, s.areas],
   );
 
   return { s, actions, lookup, screen, matterId, go, toast, notify };

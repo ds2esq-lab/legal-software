@@ -1,10 +1,9 @@
 import type { ReactNode } from 'react';
 import type { BillingArrangement, Matter } from './data';
-import { STAGES, teamInitials, teamName } from './data';
+import { OUTSIDE_BALLS, TEAM, teamInitials, teamName, isOutside } from './data';
 import { money } from './billing';
 import { useStore } from './store';
-
-const DAY = 86400000;
+import { CONTACT_LABEL, contactState, daysBetween, parseDate, todayISO } from './practice';
 
 export function startOfToday() {
   const t = new Date();
@@ -12,8 +11,10 @@ export function startOfToday() {
   return t;
 }
 
+const asDate = (iso: string) => (iso.length === 10 ? parseDate(iso) : new Date(iso));
+
 export function fmtDate(iso: string) {
-  return new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return asDate(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 export function fmtTime(iso: string) {
@@ -21,9 +22,9 @@ export function fmtTime(iso: string) {
 }
 
 export function daysFromToday(iso: string) {
-  const d = new Date(iso.length === 10 ? iso + 'T12:00:00' : iso);
+  const d = asDate(iso);
   d.setHours(0, 0, 0, 0);
-  return Math.round((d.getTime() - startOfToday().getTime()) / DAY);
+  return Math.round((d.getTime() - startOfToday().getTime()) / 86400000);
 }
 
 export function relDay(iso: string) {
@@ -32,20 +33,40 @@ export function relDay(iso: string) {
   if (n === 1) return 'Tomorrow';
   if (n === -1) return 'Yesterday';
   if (n < 0) return `${-n}d ago`;
-  if (n < 7) return new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString('en-US', { weekday: 'short' });
+  if (n < 7) return asDate(iso).toLocaleDateString('en-US', { weekday: 'short' });
   return fmtDate(iso);
 }
 
-export function DuePill({ iso }: { iso?: string }) {
-  if (!iso) return <span className="pill">No deadline</span>;
+/** A date with urgency color: red when late or due within a day, amber within 3 days. */
+export function DuePill({ iso, prefix = '' }: { iso?: string; prefix?: string }) {
+  if (!iso) return <span className="pill">None</span>;
   const n = daysFromToday(iso);
-  const cls = n < 0 ? 'danger' : n <= 1 ? 'danger' : n <= 3 ? 'warn' : '';
-  return <span className={`pill ${cls}`}>{n < 0 ? 'Overdue · ' : ''}{relDay(iso)}</span>;
+  const cls = n <= 0 ? 'danger' : n <= 3 ? 'warn' : '';
+  return (
+    <span className={`pill ${cls}`} title={fmtDate(iso)}>
+      {prefix}
+      {n < 0 ? `${-n}d late` : relDay(iso)}
+    </span>
+  );
+}
+
+export function ContactPill({ m }: { m: Matter }) {
+  const { lookup } = useStore();
+  const area = lookup.areaOf(m);
+  const st = contactState(m.lastContact, area);
+  const cls = st === 'recent' ? 'ok' : st === 'soon' ? 'warn' : 'danger';
+  const days = m.lastContact ? daysBetween(m.lastContact, todayISO()) : undefined;
+  return (
+    <span className={`pill ${cls}`} title={`Last contact ${m.lastContact ? fmtDate(m.lastContact) : 'never'} · ${area.name}: contact soon at ${area.cadence.soon}d, follow-up at ${area.cadence.followUp}d`}>
+      {CONTACT_LABEL[st]}
+      {days !== undefined && <span className="num" style={{ opacity: 0.75 }}> · {days}d</span>}
+    </span>
+  );
 }
 
 export function billingLabel(b: BillingArrangement) {
   if (b.kind === 'hourly') return `Hourly · ${money(b.rate)}/hr`;
-  if (b.kind === 'flat') return `Flat fee · ${money(b.amount)}`;
+  if (b.kind === 'flat') return b.amount ? `Flat fee · ${money(b.amount)}` : 'Flat fee · not set';
   return `Flat ${money(b.amount)} + ${money(b.rate)}/hr`;
 }
 
@@ -55,17 +76,52 @@ export function BillingPill({ b }: { b: BillingArrangement }) {
   return <span className={`pill ${cls}`}>{label}</span>;
 }
 
-export function StagePill({ stage }: { stage: Matter['stage'] }) {
-  const s = STAGES.find((x) => x.id === stage)!;
-  const cls = stage === 'waiting' ? 'warn' : stage === 'intake' || stage === 'consult' ? 'info' : stage === 'wrapup' ? 'ok' : 'accent';
-  return <span className={`pill ${cls}`}>{s.label}</span>;
+export function StagePill({ m }: { m: Matter }) {
+  const { lookup } = useStore();
+  const area = lookup.areaOf(m);
+  const idx = area.stages.findIndex((x) => x.id === m.stageId);
+  const st = area.stages[idx];
+  const last = idx === area.stages.length - 1;
+  return <span className={`pill ${last ? 'ok' : 'accent'}`}>{st?.name ?? 'Unknown stage'}</span>;
 }
 
 export function Person({ id, showName = false }: { id: string; showName?: boolean }) {
   return (
-    <span className="row" style={{ gap: 6 }} title={teamName(id)}>
-      <span className="avatar">{teamInitials(id)}</span>
-      {showName && <span>{teamName(id)}</span>}
+    <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }} title={teamName(id)}>
+      <span className={`avatar ${isOutside(id) ? 'outside' : ''}`}>{teamInitials(id)}</span>
+      {showName && <span style={{ whiteSpace: 'nowrap' }}>{teamName(id)}</span>}
+    </span>
+  );
+}
+
+/** "Whose Ball": a team member, or the client / a 3rd party / the court. */
+export function BallSelect({ value, onChange, id, compact }: { value: string; onChange: (v: string) => void; id: string; compact?: boolean }) {
+  return (
+    <select className={`input ${compact ? 'small tight' : ''} ${isOutside(value) ? 'ball-out' : ''}`} id={id} aria-label="Whose ball" value={value} onChange={(e) => onChange(e.target.value)}>
+      <optgroup label="Firm">
+        {TEAM.map((t) => (
+          <option key={t.id} value={t.id}>{t.name}</option>
+        ))}
+      </optgroup>
+      <optgroup label="Waiting on">
+        {OUTSIDE_BALLS.map((b) => (
+          <option key={b.id} value={b.id}>{b.name}</option>
+        ))}
+      </optgroup>
+    </select>
+  );
+}
+
+/** An editable date. Empty means "not set"; the clear button removes it. */
+export function DateField({ value, onChange, id, label, placeholder }: { value?: string; onChange: (v: string | undefined) => void; id: string; label: string; placeholder?: string }) {
+  return (
+    <span className="datefield">
+      <input className="input small tight num" type="date" id={id} aria-label={label} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} title={placeholder} />
+      {value && (
+        <button className="btn ghost sm icon" aria-label={`Clear ${label}`} onClick={() => onChange(undefined)}>
+          ×
+        </button>
+      )}
     </span>
   );
 }

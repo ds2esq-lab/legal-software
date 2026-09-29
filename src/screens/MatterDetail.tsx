@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { documents, STAGES, teamName, type Matter } from '../data';
+import { documents, TEAM, type Matter } from '../data';
 import { billedMinutes, formatHours, money } from '../billing';
-import { entryValue, hourlyRate } from '../calc';
-import { billingLabel, DuePill, fmtDate, fmtTime, PageHead, Person, relDay, StagePill } from '../ui';
+import { entryValue, hourlyRate, nextActions } from '../calc';
+import { dueFor, ruleText, todayISO, type PracticeArea } from '../practice';
+import { BallSelect, billingLabel, ContactPill, DateField, DuePill, fmtDate, PageHead, Person, StagePill } from '../ui';
 import Thread from '../Thread';
 
-type Tab = 'overview' | 'time' | 'billing' | 'messages' | 'documents';
+type Tab = 'timeline' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify } = useStore();
@@ -21,23 +22,11 @@ export function InvoicePreview({ m }: { m: Matter }) {
       <div className="table-wrap">
         <table className="t">
           <thead>
-            <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th className="r">Hours</th>
-              <th className="r">Rate</th>
-              <th className="r">Amount</th>
-            </tr>
+            <tr><th>Date</th><th>Description</th><th className="r">Hours</th><th className="r">Rate</th><th className="r">Amount</th></tr>
           </thead>
           <tbody>
             {fees.map((f) => (
-              <tr key={f.id}>
-                <td className="muted">Flat fee</td>
-                <td>{f.description}</td>
-                <td className="r muted">—</td>
-                <td className="r muted">—</td>
-                <td className="r num">{money(f.amount)}</td>
-              </tr>
+              <tr key={f.id}><td className="muted">Flat fee</td><td>{f.description}</td><td className="r muted">—</td><td className="r muted">—</td><td className="r num">{money(f.amount)}</td></tr>
             ))}
             {hourlyApplies &&
               entries.map((t) => (
@@ -49,36 +38,131 @@ export function InvoicePreview({ m }: { m: Matter }) {
                   <td className="r num">{money(entryValue(t, m, s.billing))}</td>
                 </tr>
               ))}
-            {!fees.length && (!hourlyApplies || !entries.length) && (
-              <tr>
-                <td colSpan={5} className="muted">Nothing unbilled on this matter.</td>
-              </tr>
-            )}
+            {!fees.length && (!hourlyApplies || !entries.length) && <tr><td colSpan={5} className="muted">Nothing unbilled on this matter.</td></tr>}
           </tbody>
         </table>
       </div>
       {!hourlyApplies && entries.length > 0 && (
-        <p className="small muted">
-          {entries.length} time {entries.length === 1 ? 'entry is' : 'entries are'} tracked on this flat-fee matter for profitability only. They won’t appear on the invoice.
-        </p>
+        <p className="small muted">{entries.length} time {entries.length === 1 ? 'entry is' : 'entries are'} tracked on this flat-fee matter for profitability only. They won’t appear on the invoice.</p>
       )}
       <div className="spread" style={{ flexWrap: 'wrap' }}>
-        <span>
-          <span className="label">Invoice total</span>{' '}
-          <span className="num" style={{ fontSize: 20, marginLeft: 8 }}>{money(total)}</span>
-        </span>
-        <button
-          className="btn primary"
-          disabled={total === 0}
-          onClick={() => {
-            actions.invoiceMatter(m.id);
-            notify(`Invoice for ${money(total)} created and posted to the client portal`);
-          }}
-        >
+        <span><span className="label">Invoice total</span> <span className="num" style={{ fontSize: 20, marginLeft: 8 }}>{money(total)}</span></span>
+        <button className="btn primary" disabled={total === 0} onClick={() => { actions.invoiceMatter(m.id); notify(`Invoice for ${money(total)} created and posted to the client portal`); }}>
           Create invoice & send to portal
         </button>
       </div>
     </div>
+  );
+}
+
+function Timeline({ m, area }: { m: Matter; area: PracticeArea }) {
+  const { actions, notify } = useStore();
+  const today = todayISO();
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Milestones</h2>
+        <span className="small muted">Due dates come from the {area.name} rules in Settings. Type a date to override it for this matter only.</span>
+      </div>
+      <div className="table-wrap">
+        <table className="t">
+          <thead>
+            <tr><th>Milestone</th><th>Completed</th><th>Due</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {area.milestones.map((ms) => {
+              const st = m.milestones[ms.id] ?? {};
+              const due = dueFor(ms, m.milestones);
+              const late = !st.done && due.date && due.date < today;
+              const waitingOn = due.waitingOn ? area.milestones.find((x) => x.id === due.waitingOn)?.name : undefined;
+              return (
+                <tr key={ms.id}>
+                  <td style={{ minWidth: 170 }}>
+                    <strong style={{ fontWeight: 500 }}>{ms.name}</strong>
+                    {ms.rule && <div className="small muted">Rule: {ruleText(ms.rule, area)}</div>}
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                      <DateField id={`done-${ms.id}`} label={`${ms.name} completed`} value={st.done} onChange={(v) => actions.setMilestone(m.id, ms.id, { done: v })} />
+                      {!st.done && (
+                        <button className="btn sm" onClick={() => { actions.setMilestone(m.id, ms.id, { done: today }); notify(`${ms.name} marked done today`); }}>Today</button>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    {st.done ? (
+                      <span className="muted small">—</span>
+                    ) : (
+                      <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                        <input
+                          className={`input small tight num ${due.source === 'manual' ? 'manual' : ''}`}
+                          type="date"
+                          id={`due-${ms.id}`}
+                          aria-label={`${ms.name} due date`}
+                          value={due.date ?? ''}
+                          onChange={(e) => actions.setMilestone(m.id, ms.id, { due: e.target.value || undefined })}
+                        />
+                        {due.source === 'manual' && (
+                          <button className="btn sm ghost" title={ms.rule ? 'Go back to the automatic due date' : 'Remove the due date'} onClick={() => actions.setMilestone(m.id, ms.id, { due: undefined })}>
+                            {ms.rule ? 'Use rule' : 'Clear'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {!st.done && due.source === 'manual' && <div className="small muted">Set by hand</div>}
+                    {!st.done && waitingOn && !due.date && <div className="small muted">Starts when {waitingOn} is done</div>}
+                  </td>
+                  <td>
+                    {st.done ? <span className="pill ok">Done {fmtDate(st.done)}</span> : late ? <span className="pill danger">Late</span> : due.date ? <DuePill iso={due.date} /> : <span className="pill">Open</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Closeout({ m }: { m: Matter }) {
+  const { actions, notify } = useStore();
+  const c = m.closeout ?? { financials: false };
+  const set = (patch: Partial<NonNullable<Matter['closeout']>>) => actions.updateMatter(m.id, { closeout: { ...c, ...patch } });
+  const done = c.financials && !!c.letterSent && (c.review === 'Hell No' || !!c.reviewRequested);
+  return (
+    <section className="panel" style={{ borderColor: 'var(--accent)' }}>
+      <div className="panel-head">
+        <h2>Closeout checklist</h2>
+        {done ? <span className="pill ok">Complete</span> : <span className="pill warn">In progress</span>}
+      </div>
+      <ul className="list">
+        <li className="spread">
+          <label className="row"><input type="checkbox" id="co-fin" checked={c.financials} onChange={(e) => set({ financials: e.target.checked })} /> Financials closed (trust balance zero, final invoice paid)</label>
+        </li>
+        <li className="spread">
+          <span>Closeout letter sent</span>
+          <DateField id="co-letter" label="Closeout letter sent" value={c.letterSent} onChange={(v) => set({ letterSent: v })} />
+        </li>
+        <li className="spread" style={{ flexWrap: 'wrap' }}>
+          <span>Ask for a review?</span>
+          <div className="seg" role="group" aria-label="Review request">
+            {(['Definitely', 'Ask First', 'Hell No'] as const).map((r) => (
+              <button key={r} aria-pressed={c.review === r} onClick={() => set({ review: r })}>{r}</button>
+            ))}
+          </div>
+        </li>
+        {c.review && c.review !== 'Hell No' && (
+          <li className="spread">
+            <span>{c.review === 'Ask First' ? 'Checked with the attorney, then requested' : 'Review requested'}</span>
+            <div className="row" style={{ gap: 4 }}>
+              <DateField id="co-review" label="Review requested" value={c.reviewRequested} onChange={(v) => set({ reviewRequested: v })} />
+              {!c.reviewRequested && <button className="btn sm" onClick={() => { set({ reviewRequested: todayISO() }); notify('Review request sent with your Google review link'); }}>Send request</button>}
+            </div>
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }
 
@@ -104,13 +188,13 @@ function TimeTab({ m }: { m: Matter }) {
           </div>
           <div className="field" style={{ flex: '1 1 240px' }}>
             <label htmlFor="desc">Description (appears on invoice)</label>
-            <input className="input" id="desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. Review and revise operating agreement" />
+            <input className="input" id="desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. Review and revise trust agreement" />
           </div>
           <button
             className="btn primary"
             disabled={n === 0}
             onClick={() => {
-              actions.addTimeEntry({ matterId: m.id, date: new Date().toISOString().slice(0, 10), actualMinutes: n, description: desc || 'Untitled work', user: 'me', billable: true, invoiced: false, source: 'manual' });
+              actions.addTimeEntry({ matterId: m.id, date: todayISO(), actualMinutes: n, description: desc || 'Untitled work', user: 'me', billable: true, invoiced: false, source: 'manual' });
               setDesc('');
               notify(`Saved: ${n} min worked → ${formatHours(billed, s.billing)} hr billed`);
             }}
@@ -119,27 +203,18 @@ function TimeTab({ m }: { m: Matter }) {
           </button>
         </div>
         <div className="panel-body small" style={{ paddingTop: 0 }}>
-          <span className="muted">Rounding rule: </span>
+          <span className="muted">Rounding: </span>
           <span className="num">{n} min</span> → <strong className="num">{formatHours(billed, s.billing)} hr</strong>
-          <span className="muted"> ({s.billing.mode === 'up' ? 'round up' : 'round to nearest'} to {s.billing.incrementMinutes}-minute increments, {s.billing.minimumMinutes}-minute minimum)</span>
+          <span className="muted"> ({s.billing.mode === 'up' ? 'round up' : 'round to nearest'} to {s.billing.incrementMinutes}-minute increments)</span>
         </div>
       </div>
-
       <div className="panel table-wrap">
         <table className="t">
           <thead>
-            <tr>
-              <th>Date</th>
-              <th>Who</th>
-              <th>Description</th>
-              <th className="r">Actual</th>
-              <th className="r">Billed</th>
-              <th>Source</th>
-              <th>Billable</th>
-              <th>Status</th>
-            </tr>
+            <tr><th>Date</th><th>Who</th><th>Description</th><th className="r">Actual</th><th className="r">Billed</th><th>Billable</th><th>Status</th></tr>
           </thead>
           <tbody>
+            {entries.length === 0 && <tr><td colSpan={7} className="muted">No time yet.</td></tr>}
             {entries.map((t) => (
               <tr key={t.id}>
                 <td className="num">{fmtDate(t.date)}</td>
@@ -147,10 +222,7 @@ function TimeTab({ m }: { m: Matter }) {
                 <td style={{ minWidth: 220 }}>{t.description}</td>
                 <td className="r num muted">{t.actualMinutes}m</td>
                 <td className="r num">{formatHours(billedMinutes(t.actualMinutes, s.billing), s.billing)}</td>
-                <td><span className="pill">{t.source ?? 'manual'}</span></td>
-                <td>
-                  <input type="checkbox" id={`bill-${t.id}`} aria-label="Billable" checked={t.billable} disabled={t.invoiced} onChange={() => actions.toggleBillable(t.id)} />
-                </td>
+                <td><input type="checkbox" id={`bill-${t.id}`} aria-label="Billable" checked={t.billable} disabled={t.invoiced} onChange={() => actions.toggleBillable(t.id)} /></td>
                 <td>{t.invoiced ? <span className="pill ok">Invoiced</span> : <span className="pill">Unbilled</span>}</td>
               </tr>
             ))}
@@ -162,81 +234,115 @@ function TimeTab({ m }: { m: Matter }) {
 }
 
 export default function MatterDetail() {
-  const { s, matterId, lookup, go } = useStore();
-  const [tab, setTab] = useState<Tab>('overview');
+  const { s, matterId, lookup, go, actions, notify } = useStore();
+  const [tab, setTab] = useState<Tab>('timeline');
   const m = lookup.matter(matterId);
   if (!m) return <p>Matter not found.</p>;
+  const area = lookup.areaOf(m);
   const client = lookup.clientOf(m);
-  const stageIdx = STAGES.findIndex((x) => x.id === m.stage);
-  const rems = s.reminders.filter((r) => r.matterId === m.id && !r.done).sort((a, b) => a.due.localeCompare(b.due));
-  const evs = s.events.filter((e) => e.matterId === m.id).sort((a, b) => a.start.localeCompare(b.start));
-  const calls = s.calls.filter((c) => c.matterId === m.id);
+  const stageIdx = area.stages.findIndex((x) => x.id === m.stageId);
+  const closing = stageIdx >= area.stages.length - 2;
+  const upcoming = nextActions(m, area).slice(0, 3);
   const docs = documents[m.id] ?? [];
+  const up = (patch: Partial<Matter>) => actions.updateMatter(m.id, patch);
 
   return (
     <>
-      <div className="small">
-        <button className="link" onClick={() => go('matters')}>← Matters</button>
-      </div>
-      <PageHead title={m.name} sub={`${client?.name} · ${m.area} · Matter ${m.number}`}>
-        <StagePill stage={m.stage} />
+      <div className="small"><button className="link" onClick={() => go('matters')}>← Matters</button></div>
+      <PageHead title={m.name} sub={`${client?.name} · ${area.name}${m.planType ? ` · ${m.planType}` : ''} · Matter ${m.number}`}>
+        <StagePill m={m} />
+        {m.stalled && <span className="pill warn">Stalled</span>}
         <button className="btn" onClick={() => go('portal', m.id)}>View client portal</button>
       </PageHead>
 
       <div className="stack" style={{ gap: 6 }}>
-        <div className="stages" aria-label={`Stage ${stageIdx + 1} of ${STAGES.length}`}>
-          {STAGES.map((x, i) => <div key={x.id} className={i <= stageIdx ? 'on' : ''} />)}
+        <div className="stages" style={{ gridTemplateColumns: `repeat(${area.stages.length}, minmax(0, 1fr))` }} aria-label={`Stage ${stageIdx + 1} of ${area.stages.length}`}>
+          {area.stages.map((x, i) => (
+            <button key={x.id} className={i <= stageIdx ? 'on' : ''} title={`Move to ${x.name}`} aria-label={`Move to ${x.name}`} onClick={() => { up({ stageId: x.id }); notify(`Moved to ${x.name}`); }} />
+          ))}
         </div>
-        <div className="small muted">{STAGES.map((x) => x.label).join('  ·  ')}</div>
+        <div className="small muted">{area.stages.map((x, i) => (i === stageIdx ? `▸ ${x.name}` : x.name)).join('  ·  ')}</div>
       </div>
 
-      <div className="tabs" role="tablist">
-        {(['overview', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-            {t[0].toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'overview' && (
-        <div className="grid cols-main">
-          <div className="stack" style={{ gap: 16 }}>
-            <section className="panel">
-              <div className="panel-head"><h2>Deadlines & reminders</h2><button className="btn sm ghost" onClick={() => go('reminders')}>Manage →</button></div>
-              <ul className="list">
-                {rems.length === 0 && <li className="muted">None open.</li>}
-                {rems.map((r) => (
-                  <li key={r.id} className="spread">
-                    <span>{r.title}<div className="small muted">{teamName(r.assignee)}{r.escalateTo ? ` · escalates to ${teamName(r.escalateTo)}` : ''}</div></span>
-                    <DuePill iso={r.due} />
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <section className="panel">
-              <div className="panel-head"><h2>Activity</h2></div>
-              <ul className="list">
-                {evs.map((e) => (
-                  <li key={e.id}><span className="pill">{e.kind}</span><span>{e.title}<div className="small muted">{relDay(e.start)} {fmtTime(e.start)} · {e.minutes} min</div></span></li>
-                ))}
-                {calls.map((c) => (
-                  <li key={c.id}><span className="pill info">call</span><span>{c.direction === 'in' ? 'Incoming' : 'Outgoing'} call · {c.contact}<div className="small muted">{relDay(c.at)} {fmtTime(c.at)} · {Math.ceil(c.seconds / 60)} min {c.logged ? '· time logged' : ''}</div></span></li>
-                ))}
-              </ul>
-            </section>
+      <div className="grid cols-main">
+        <section className="panel">
+          <div className="panel-head"><h2>Working this matter</h2></div>
+          <div className="panel-body grid cols-2" style={{ gap: 12 }}>
+            <div className="field">
+              <label htmlFor="d-stage">Stage</label>
+              <select className="input" id="d-stage" value={m.stageId} onChange={(e) => up({ stageId: e.target.value })}>
+                {area.stages.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="d-ball">Whose Ball</label>
+              <BallSelect id="d-ball" value={m.ball} onChange={(v) => up({ ball: v })} />
+            </div>
+            <div className="field">
+              <label htmlFor="d-plan">{area.planLabel}</label>
+              <select className="input" id="d-plan" value={m.planType ?? ''} onChange={(e) => up({ planType: e.target.value || undefined })}>
+                <option value="">Not set</option>
+                {area.planTypes.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="d-owner">Responsible attorney</label>
+              <select className="input" id="d-owner" value={m.owner} onChange={(e) => up({ owner: e.target.value })}>
+                {TEAM.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="d-lcd">Last client contact</label>
+              <div className="row" style={{ gap: 6 }}>
+                <DateField id="d-lcd" label="Last client contact" value={m.lastContact} onChange={(v) => up({ lastContact: v })} />
+                <button className="btn sm" onClick={() => { actions.logContact(m.id); notify('Contact logged today'); }}>Today</button>
+              </div>
+              <div><ContactPill m={m} /></div>
+            </div>
+            <div className="field">
+              <label htmlFor="d-susp">Suspense date</label>
+              <DateField id="d-susp" label="Suspense date" value={m.suspense} onChange={(v) => up({ suspense: v })} />
+              <input className="input small" id="d-susp-note" aria-label="Suspense note" placeholder="What’s the suspense for?" value={m.suspenseNote ?? ''} onChange={(e) => up({ suspenseNote: e.target.value || undefined })} />
+            </div>
+            <label className="row small"><input type="checkbox" id="d-stalled" checked={m.stalled} onChange={(e) => up({ stalled: e.target.checked })} /> Stalled</label>
+            <label className="row small"><input type="checkbox" id="d-prio" checked={m.priority} onChange={(e) => up({ priority: e.target.checked })} /> Priority</label>
           </div>
+        </section>
+
+        <div className="stack" style={{ gap: 16 }}>
           <section className="panel">
-            <div className="panel-head"><h2>Matter details</h2></div>
-            <div className="panel-body stack">
-              <div><div className="label">Client</div>{client?.name}<div className="small muted">{client?.email} · {client?.phone}</div></div>
-              <div><div className="label">Responsible attorney</div><Person id={m.owner} showName /></div>
-              <div><div className="label">Fee arrangement</div>{billingLabel(m.billing)}{m.billing.kind === 'hybrid' && <div className="small muted">Flat fee covers: {m.billing.covers}. Anything else is hourly.</div>}</div>
-              <div><div className="label">Opened</div>{fmtDate(m.opened)}</div>
-              <div><div className="label">Next deadline</div><DuePill iso={m.nextDeadline} /></div>
+            <div className="panel-head"><h2>Coming up</h2></div>
+            <ul className="list">
+              {upcoming.length === 0 && <li className="muted">Nothing dated. Set a suspense date so this doesn’t go quiet.</li>}
+              {upcoming.map((a, i) => (
+                <li key={i} className="spread">
+                  <span>{a.what}<div className="small muted">{a.kind === 'suspense' ? 'Suspense' : a.kind === 'milestone' ? 'Milestone' : `Contact timer (${area.cadence.soon} days)`}</div></span>
+                  <DuePill iso={a.date} />
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="panel">
+            <div className="panel-head"><h2>Client</h2></div>
+            <div className="panel-body small stack" style={{ gap: 4 }}>
+              <strong style={{ fontSize: 14 }}>{client?.name}</strong>
+              <span className="num">{client?.phone}</span>
+              <span>{client?.email}</span>
+              <span className="muted">{billingLabel(m.billing)}</span>
             </div>
           </section>
         </div>
-      )}
+      </div>
+
+      {closing && <Closeout m={m} />}
+
+      <div className="tabs" role="tablist">
+        {(['timeline', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
+        ))}
+      </div>
+
+      {tab === 'timeline' && <Timeline m={m} area={area} />}
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (
         <section className="panel">
@@ -244,9 +350,7 @@ export default function MatterDetail() {
           <div className="panel-body"><InvoicePreview m={m} /></div>
         </section>
       )}
-      {tab === 'messages' && (
-        <section className="panel"><Thread channel={m.id} allowClient clientName={client?.name} /></section>
-      )}
+      {tab === 'messages' && <section className="panel"><Thread channel={m.id} allowClient clientName={client?.name} /></section>}
       {tab === 'documents' && (
         <section className="panel">
           <div className="panel-head"><h2>Documents</h2><button className="btn sm">Upload</button></div>
@@ -264,6 +368,7 @@ export default function MatterDetail() {
           </ul>
         </section>
       )}
+      <p className="small muted">{s.timeEntries.filter((t) => t.matterId === m.id).length} time entries · opened {fmtDate(m.opened)}</p>
     </>
   );
 }

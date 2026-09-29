@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore, type Screen } from './store';
 import { formatClock } from './billing';
 import Today from './screens/Today';
+import Intake from './screens/Intake';
 import Matters from './screens/Matters';
 import MatterDetail from './screens/MatterDetail';
 import TimeBilling from './screens/TimeBilling';
@@ -15,6 +16,7 @@ import Settings from './screens/Settings';
 
 const NAV: { group?: string; id: Screen; label: string }[] = [
   { id: 'today', label: 'Today' },
+  { id: 'intake', label: 'Intake' },
   { id: 'matters', label: 'Matters' },
   { id: 'reminders', label: 'Reminders' },
   { id: 'calendar', label: 'Calendar' },
@@ -40,7 +42,7 @@ function TimerWidget() {
   useTick(!!s.timer);
   if (!s.timer) {
     return (
-      <button className="btn" onClick={() => actions.startTimer('m4', 'Draft opposition brief')}>
+      <button className="btn" onClick={() => actions.startTimer('m2', 'Draft trust agreement')}>
         ▶ Start timer
       </button>
     );
@@ -102,6 +104,7 @@ export default function App() {
 
   const view = {
     today: <Today />,
+    intake: <Intake />,
     matters: <Matters />,
     matter: <MatterDetail />,
     time: <TimeBilling />,
@@ -132,7 +135,7 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <div className="rail-foot">Sample data. Nothing here is real client information.</div>
+        <div className="rail-foot">Sample data only. All names are fictional.</div>
       </aside>
       <div className="main">
         <header className="topbar">

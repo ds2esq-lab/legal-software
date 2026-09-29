@@ -45,9 +45,10 @@ function BookingPage({ type }: { type: EventType }) {
   const days = useMemo(() => nextBusinessDays(5), []);
   const [dayIdx, setDayIdx] = useState(1);
   const [slot, setSlot] = useState<Date | null>(null);
-  const [name, setName] = useState('Jordan Avery');
+  const [name, setName] = useState('Avery, Jordan');
   const [email, setEmail] = useState('jordan.avery@example.com');
-  const [answers, setAnswers] = useState<string[]>(type.who === 'prospects' ? ['Dispute with a contractor over unfinished work', 'Brightside Builders Inc.', ''] : ['']);
+  const [phone] = useState('(555) 555-0142');
+  const [answers, setAnswers] = useState<string[]>(type.who === 'prospects' ? ['Trust for our family; we have a rental property', 'Spouse: Casey Avery', ''] : ['']);
   const [booked, setBooked] = useState<Date | null>(null);
 
   const slots = slotsFor(days[dayIdx], type, s.events);
@@ -57,7 +58,7 @@ function BookingPage({ type }: { type: EventType }) {
       <div className="booking">
         <div className="booking-head">
           <div className="label">Confirmed</div>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 20 }}>You’re booked, {name.split(' ')[0]}.</h2>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 20 }}>You’re booked, {name.split(',').pop()?.trim()}.</h2>
           <div className="muted">{booked.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} at {fmtTime(booked.toISOString())} · {type.minutes} min</div>
         </div>
         <div className="panel-body stack">
@@ -66,8 +67,8 @@ function BookingPage({ type }: { type: EventType }) {
             <li>Added to your calendar with {type.bufferBefore} min before and {type.bufferAfter} min after held open.</li>
             {type.who === 'prospects' ? (
               <>
-                <li>New lead created in <button className="link" onClick={() => go('matters')}>Matters → Consult booked</button>.</li>
-                <li>Conflict check queued against “{answers[1] || 'no parties named'}”. Posted to #intake.</li>
+                <li>Added to <button className="link" onClick={() => go('intake')}>Intake → Consult scheduled</button>, with show-rate reminders {s.cadences.preConsult.map((d) => -d).join(', ')} days before.</li>
+                <li>Conflict check queued against “{answers[1] || 'no one named'}”. Posted to #intake.</li>
               </>
             ) : (
               <li>Linked to the client’s matter. A time entry is drafted when the call ends.</li>
@@ -116,7 +117,7 @@ function BookingPage({ type }: { type: EventType }) {
             onSubmit={(e) => {
               e.preventDefault();
               if (!name.trim()) return;
-              actions.book(type.id, slot.toISOString(), name.trim(), answers);
+              actions.book(type.id, slot.toISOString(), name.trim(), phone, answers);
               setBooked(slot);
             }}
           >

@@ -1,31 +1,262 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import { INCREMENT_OPTIONS, type RoundingMode } from '../billing';
+import type { Cadences } from '../data';
+import { newId, type DueRule, type Milestone, type PracticeArea, type Stage } from '../practice';
 import { PageHead } from '../ui';
 
+type Section = 'areas' | 'intake' | 'billing' | 'integrations';
+
 const INTEGRATIONS = [
-  { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time.', status: 'Planned' },
-  { name: 'Calendar', detail: 'Google and Microsoft 365, two-way sync. Your availability for booking links comes from here.', status: 'Planned' },
-  { name: 'Email', detail: 'Gmail and Outlook. File an email thread to a matter in one click.', status: 'Planned' },
+  { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
+  { name: 'Calendar', detail: 'Google and Microsoft 365, two-way sync. Booking-link availability comes from here.', status: 'Planned' },
+  { name: 'Email', detail: 'Outlook and Gmail. Emails to and from a client are filed on the matter and count as contact.', status: 'Planned' },
+  { name: 'Slack', detail: 'Post milestone and closeout alerts to your existing channels while the team moves over.', status: 'Planned' },
   { name: 'Payments', detail: 'Card and ACH with trust vs. operating account separation (IOLTA-safe).', status: 'Planned' },
   { name: 'E-signature', detail: 'Engagement letters and documents signed inside the client portal.', status: 'Planned' },
-  { name: 'Accounting', detail: 'QuickBooks Online sync for invoices and payments.', status: 'Later' },
+  { name: 'monday.com import', detail: 'One-time import of open matters, milestone dates and completed-matter history.', status: 'Planned' },
 ];
 
+function move<T>(arr: T[], i: number, d: -1 | 1): T[] {
+  const j = i + d;
+  if (j < 0 || j >= arr.length) return arr;
+  const out = [...arr];
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
+}
+
+function AddRow({ placeholder, onAdd, id }: { placeholder: string; onAdd: (v: string) => void; id: string }) {
+  const [v, setV] = useState('');
+  return (
+    <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); if (v.trim()) { onAdd(v.trim()); setV(''); } }}>
+      <input className="input small" style={{ flex: '1 1 180px' }} id={id} aria-label={placeholder} placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />
+      <button className="btn sm" type="submit">Add</button>
+    </form>
+  );
+}
+
+function AreaEditor({ area }: { area: PracticeArea }) {
+  const { s, actions, notify } = useStore();
+  const save = (patch: Partial<PracticeArea>) => actions.saveArea({ ...area, ...patch });
+  const inStage = (id: string) => s.matters.filter((m) => m.areaId === area.id && m.stageId === id).length;
+  const areaMatters = s.matters.filter((m) => m.areaId === area.id).length;
+
+  const setStages = (stages: Stage[]) => save({ stages });
+  const setMilestones = (milestones: Milestone[]) => save({ milestones });
+  const setRule = (i: number, rule: DueRule | undefined) => setMilestones(area.milestones.map((m, k) => (k === i ? { ...m, rule } : m)));
+
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <section className="panel">
+        <div className="panel-head">
+          <h2>General</h2>
+          <button
+            className="btn sm danger"
+            disabled={areaMatters > 0}
+            title={areaMatters ? `${areaMatters} matters use this area. Move or close them first.` : 'Delete this practice area'}
+            onClick={() => { actions.deleteArea(area.id); notify(`${area.name} deleted`); }}
+          >
+            Delete area
+          </button>
+        </div>
+        <div className="panel-body grid cols-2" style={{ gap: 12 }}>
+          <div className="field"><label htmlFor="a-name">Name</label><input className="input" id="a-name" value={area.name} onChange={(e) => save({ name: e.target.value })} /></div>
+          <div className="field"><label htmlFor="a-plan">What you call the matter type</label><input className="input" id="a-plan" value={area.planLabel} onChange={(e) => save({ planLabel: e.target.value })} /></div>
+          <div className="field">
+            <label htmlFor="a-soon">“Contact soon” after (days without contact)</label>
+            <input className="input num" id="a-soon" type="number" min={1} value={area.cadence.soon} onChange={(e) => save({ cadence: { ...area.cadence, soon: Math.max(1, Number(e.target.value) || 1) } })} />
+          </div>
+          <div className="field">
+            <label htmlFor="a-fu">“Follow-up needed” after (days)</label>
+            <input className="input num" id="a-fu" type="number" min={1} value={area.cadence.followUp} onChange={(e) => save({ cadence: { ...area.cadence, followUp: Math.max(1, Number(e.target.value) || 1) } })} />
+          </div>
+        </div>
+        {area.cadence.followUp <= area.cadence.soon && <div className="panel-body banner warn" style={{ margin: '0 16px 14px' }}>“Follow-up needed” should be later than “Contact soon”.</div>}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head"><h2>Stages</h2><span className="small muted">Board columns, in order. The last one is closeout.</span></div>
+        <ul className="list">
+          {area.stages.map((st, i) => (
+            <li key={st.id} className="spread">
+              <span className="num small muted" style={{ width: 20 }}>{i + 1}</span>
+              <input className="input small" style={{ flex: 1 }} id={`st-${st.id}`} aria-label="Stage name" value={st.name} onChange={(e) => setStages(area.stages.map((x) => (x.id === st.id ? { ...x, name: e.target.value } : x)))} />
+              <span className="small muted num" style={{ width: 70, textAlign: 'right' }}>{inStage(st.id)} matter{inStage(st.id) === 1 ? '' : 's'}</span>
+              <button className="btn sm ghost icon" aria-label="Move up" disabled={i === 0} onClick={() => setStages(move(area.stages, i, -1))}>↑</button>
+              <button className="btn sm ghost icon" aria-label="Move down" disabled={i === area.stages.length - 1} onClick={() => setStages(move(area.stages, i, 1))}>↓</button>
+              <button
+                className="btn sm ghost icon danger"
+                aria-label={`Delete ${st.name}`}
+                disabled={inStage(st.id) > 0 || area.stages.length <= 2}
+                title={inStage(st.id) > 0 ? 'Move the matters in this stage first' : 'Delete stage'}
+                onClick={() => setStages(area.stages.filter((x) => x.id !== st.id))}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="panel-body"><AddRow id="add-stage" placeholder="New stage name" onAdd={(name) => { const stages = [...area.stages]; stages.splice(stages.length - 1, 0, { id: newId('st'), name }); setStages(stages); }} /></div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head"><h2>Milestones & deadline rules</h2><span className="small muted">The dated steps of every matter. A rule sets the due date automatically; any matter can override it.</span></div>
+        <div className="table-wrap">
+          <table className="t">
+            <thead><tr><th>Milestone</th><th>Automatic due date</th><th /></tr></thead>
+            <tbody>
+              {area.milestones.map((ms, i) => (
+                <tr key={ms.id}>
+                  <td style={{ minWidth: 200 }}>
+                    <input className="input small" id={`ms-${ms.id}`} aria-label="Milestone name" value={ms.name} onChange={(e) => setMilestones(area.milestones.map((x) => (x.id === ms.id ? { ...x, name: e.target.value } : x)))} />
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 4 }}>
+                      <select className="input small tight" style={{ width: 'auto' }} id={`rule-on-${ms.id}`} aria-label="Has a rule" value={ms.rule ? 'on' : 'off'} onChange={(e) => {
+                        const prev = area.milestones.slice(0, i).reverse()[0];
+                        setRule(i, e.target.value === 'on' && prev ? { after: prev.id, amount: 5, unit: 'workdays' } : undefined);
+                      }}>
+                        <option value="off">None</option>
+                        <option value="on" disabled={i === 0}>Due…</option>
+                      </select>
+                      {ms.rule && (
+                        <>
+                          <input className="input small tight num" style={{ width: 64 }} type="number" min={0} id={`rule-n-${ms.id}`} aria-label="Amount" value={ms.rule.amount} onChange={(e) => setRule(i, { ...ms.rule!, amount: Math.max(0, Number(e.target.value) || 0) })} />
+                          <select className="input small tight" style={{ width: 'auto' }} id={`rule-u-${ms.id}`} aria-label="Unit" value={ms.rule.unit} onChange={(e) => setRule(i, { ...ms.rule!, unit: e.target.value as DueRule['unit'] })}>
+                            <option value="days">calendar days</option>
+                            <option value="workdays">workdays</option>
+                          </select>
+                          <span className="small muted">after</span>
+                          <select className="input small tight" style={{ width: 'auto' }} id={`rule-a-${ms.id}`} aria-label="After milestone" value={ms.rule.after} onChange={(e) => setRule(i, { ...ms.rule!, after: e.target.value })}>
+                            {area.milestones.filter((x) => x.id !== ms.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                          </select>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td className="r" style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn sm ghost icon" aria-label="Move up" disabled={i === 0} onClick={() => setMilestones(move(area.milestones, i, -1))}>↑</button>
+                    <button className="btn sm ghost icon" aria-label="Move down" disabled={i === area.milestones.length - 1} onClick={() => setMilestones(move(area.milestones, i, 1))}>↓</button>
+                    <button
+                      className="btn sm ghost icon danger"
+                      aria-label={`Delete ${ms.name}`}
+                      onClick={() => setMilestones(area.milestones.filter((x) => x.id !== ms.id).map((x) => (x.rule?.after === ms.id ? { ...x, rule: undefined } : x)))}
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="panel-body stack" style={{ gap: 8 }}>
+          <AddRow id="add-ms" placeholder="New milestone name" onAdd={(name) => setMilestones([...area.milestones.slice(0, -1), { id: newId('ms'), name }, ...area.milestones.slice(-1)])} />
+          <p className="small muted">The probate and guardianship rules here are starting examples. Set them to your jurisdiction’s actual deadlines.</p>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head"><h2>{area.planLabel} options</h2></div>
+        <div className="panel-body stack" style={{ gap: 10 }}>
+          <div className="row" style={{ gap: 6 }}>
+            {area.planTypes.length === 0 && <span className="small muted">None yet.</span>}
+            {area.planTypes.map((p) => (
+              <span key={p} className="pill chip">
+                {p}
+                <button className="chip-x" aria-label={`Remove ${p}`} onClick={() => save({ planTypes: area.planTypes.filter((x) => x !== p) })}>×</button>
+              </span>
+            ))}
+          </div>
+          <AddRow id="add-plan" placeholder={`New ${area.planLabel.toLowerCase()}`} onAdd={(v) => !area.planTypes.includes(v) && save({ planTypes: [...area.planTypes, v] })} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CadenceEditor() {
+  const { s, actions, notify } = useStore();
+  const rows: { key: keyof Cadences; label: string; help: string }[] = [
+    { key: 'scheduling', label: 'Getting the consult booked', help: 'Days after first contact' },
+    { key: 'preConsult', label: 'Before the consult (show-rate reminders)', help: 'Days before the consult, as negative numbers' },
+    { key: 'followUp', label: 'After the consult', help: 'Days after the consult' },
+    { key: 'el', label: 'After the engagement letter', help: 'Days after the letter goes out' },
+  ];
+  const [draft, setDraft] = useState(() => Object.fromEntries(rows.map((r) => [r.key, s.cadences[r.key].join(', ')])) as Record<keyof Cadences, string>);
+  const parse = (v: string) => v.split(/[,\s]+/).map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n));
+  return (
+    <section className="panel">
+      <div className="panel-head"><h2>Intake follow-up cadences</h2><span className="small muted">Every prospect gets these touches automatically, and they show up in Intake → Due today.</span></div>
+      <form
+        className="panel-body stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const next = Object.fromEntries(rows.map((r) => [r.key, [...new Set(parse(draft[r.key]))].sort((a, b) => a - b)])) as unknown as Cadences;
+          actions.setCadences(next);
+          setDraft(Object.fromEntries(rows.map((r) => [r.key, next[r.key].join(', ')])) as Record<keyof Cadences, string>);
+          notify('Cadences saved. Every open prospect’s schedule updated.');
+        }}
+      >
+        {rows.map((r) => (
+          <div key={r.key} className="field">
+            <label htmlFor={`cad-${r.key}`}>{r.label} <span className="muted">· {r.help}</span></label>
+            <input className="input num" id={`cad-${r.key}`} value={draft[r.key]} onChange={(e) => setDraft((d) => ({ ...d, [r.key]: e.target.value }))} />
+          </div>
+        ))}
+        <div><button className="btn primary" type="submit">Save cadences</button></div>
+      </form>
+    </section>
+  );
+}
+
 export default function Settings() {
-  const { s, actions } = useStore();
+  const { s, actions, notify } = useStore();
+  const [section, setSection] = useState<Section>('areas');
+  const [areaId, setAreaId] = useState(s.areas[0]?.id);
+  const area = s.areas.find((a) => a.id === areaId) ?? s.areas[0];
+
   return (
     <>
-      <PageHead title="Settings" sub="Firm-wide rules. Change them here and every screen follows." />
-      <div className="grid cols-2">
-        <section className="panel">
+      <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
+      <div className="tabs" role="tablist">
+        {([['areas', 'Practice areas'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
+        ))}
+      </div>
+
+      {section === 'areas' && (
+        <div className="grid settings-grid">
+          <nav className="panel" aria-label="Practice areas">
+            <ul className="list">
+              {s.areas.map((a) => (
+                <li key={a.id} style={{ padding: 0 }}>
+                  <button className={`area-link ${a.id === area?.id ? 'on' : ''}`} onClick={() => setAreaId(a.id)}>
+                    <span>{a.name}</span>
+                    <span className="num small muted">{s.matters.filter((m) => m.areaId === a.id).length}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="panel-body stack" style={{ gap: 8, borderTop: '1px solid var(--line)' }}>
+              <AddRow id="add-area" placeholder="New practice area" onAdd={(name) => { const id = actions.addArea(name); setAreaId(id); notify(`${name} added with starter stages. Edit them on the right.`); }} />
+              <button className="btn sm ghost" onClick={() => { actions.resetAreas(); setAreaId('ep'); notify('Practice areas reset to the firm defaults'); }}>Reset to defaults</button>
+            </div>
+          </nav>
+          {area ? <AreaEditor key={area.id} area={area} /> : <p className="muted">Add a practice area to start.</p>}
+        </div>
+      )}
+
+      {section === 'intake' && <CadenceEditor />}
+
+      {section === 'billing' && (
+        <section className="panel" style={{ maxWidth: 560 }}>
           <div className="panel-head"><h2>Billing increments</h2></div>
           <div className="panel-body stack">
             <div className="field">
               <label htmlFor="inc">Bill time in increments of</label>
               <select className="input" id="inc" value={s.billing.incrementMinutes} onChange={(e) => actions.setBilling({ incrementMinutes: Number(e.target.value) })}>
-                {INCREMENT_OPTIONS.map((n) => (
-                  <option key={n} value={n}>{n} minutes{n === 6 ? ' (tenth of an hour)' : n === 15 ? ' (quarter hour)' : ''}</option>
-                ))}
+                {INCREMENT_OPTIONS.map((n) => <option key={n} value={n}>{n} minutes{n === 6 ? ' (tenth of an hour)' : n === 15 ? ' (quarter hour)' : ''}</option>)}
               </select>
             </div>
             <div className="field">
@@ -41,21 +272,22 @@ export default function Settings() {
                 {[0, 6, 12, 15].map((n) => <option key={n} value={n}>{n === 0 ? 'None' : `${n} minutes`}</option>)}
               </select>
             </div>
-            <p className="small muted">Later, these can be overridden per client or per matter, for example when an engagement letter specifies quarter-hour billing.</p>
           </div>
         </section>
+      )}
+
+      {section === 'integrations' && (
         <section className="panel">
-          <div className="panel-head"><h2>Integrations</h2></div>
           <ul className="list">
             {INTEGRATIONS.map((i) => (
               <li key={i.name} className="spread" style={{ alignItems: 'flex-start' }}>
                 <span><strong>{i.name}</strong><div className="small muted">{i.detail}</div></span>
-                <span className={`pill ${i.status === 'Planned' ? 'info' : ''}`}>{i.status}</span>
+                <span className="pill info">{i.status}</span>
               </li>
             ))}
           </ul>
         </section>
-      </div>
+      )}
     </>
   );
 }
