@@ -31,7 +31,7 @@ export default function Phone() {
                     ) : (
                       <select className="input small" style={{ padding: '2px 6px', width: 'auto', maxWidth: 220 }} id={`assign-${c.id}`} aria-label="Assign to matter" value={assign[c.id] ?? c.matterId ?? ''} onChange={(e) => setAssign((a) => ({ ...a, [c.id]: e.target.value }))}>
                         <option value="">Choose matter…</option>
-                        {s.matters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        {s.matters.filter((m) => m.status === 'open').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     )}
                   </td>

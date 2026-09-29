@@ -6,8 +6,9 @@ import { entryValue, hourlyRate, nextActions } from '../calc';
 import { dueFor, ruleText, todayISO, type PracticeArea } from '../practice';
 import { BallSelect, billingLabel, ContactPill, DateField, DuePill, fmtDate, PageHead, Person, StagePill } from '../ui';
 import Thread from '../Thread';
+import { NotesPanel, PartiesPanel } from '../people';
 
-type Tab = 'timeline' | 'time' | 'billing' | 'messages' | 'documents';
+type Tab = 'timeline' | 'notes' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify } = useStore();
@@ -126,7 +127,7 @@ function Timeline({ m, area }: { m: Matter; area: PracticeArea }) {
 }
 
 function Closeout({ m }: { m: Matter }) {
-  const { actions, notify } = useStore();
+  const { actions, notify, go } = useStore();
   const c = m.closeout ?? { financials: false };
   const set = (patch: Partial<NonNullable<Matter['closeout']>>) => actions.updateMatter(m.id, { closeout: { ...c, ...patch } });
   const done = c.financials && !!c.letterSent && (c.review === 'Hell No' || !!c.reviewRequested);
@@ -134,7 +135,19 @@ function Closeout({ m }: { m: Matter }) {
     <section className="panel" style={{ borderColor: 'var(--accent)' }}>
       <div className="panel-head">
         <h2>Closeout checklist</h2>
-        {done ? <span className="pill ok">Complete</span> : <span className="pill warn">In progress</span>}
+        <span className="row" style={{ gap: 6 }}>
+          {done ? <span className="pill ok">Complete</span> : <span className="pill warn">In progress</span>}
+          {m.status === 'open' && (
+            <button
+              className="btn sm primary"
+              disabled={!done}
+              title={done ? 'Move to Former clients' : 'Finish the checklist first'}
+              onClick={() => { actions.closeMatter(m.id); notify(`${m.name} closed. It’s now under Client matters → Former clients.`); go('matters'); }}
+            >
+              Close matter
+            </button>
+          )}
+        </span>
       </div>
       <ul className="list">
         <li className="spread">
@@ -322,27 +335,40 @@ export default function MatterDetail() {
               ))}
             </ul>
           </section>
-          <section className="panel">
-            <div className="panel-head"><h2>Client</h2></div>
-            <div className="panel-body small stack" style={{ gap: 4 }}>
-              <strong style={{ fontSize: 14 }}>{client?.name}</strong>
-              <span className="num">{client?.phone}</span>
-              <span>{client?.email}</span>
-              <span className="muted">{billingLabel(m.billing)}</span>
-            </div>
-          </section>
+          {m.notes.some((n) => n.pinned) && (
+            <section className="panel pinned-notes">
+              <div className="panel-head"><h2>Pinned notes</h2><button className="btn sm ghost" onClick={() => setTab('notes')}>All notes →</button></div>
+              <ul className="list">
+                {m.notes.filter((n) => n.pinned).map((n) => <li key={n.id} className="small" style={{ display: 'block' }}>{n.text}</li>)}
+              </ul>
+            </section>
+          )}
+          <PartiesPanel target={{ kind: 'matter', id: m.id }} parties={m.parties} />
         </div>
       </div>
 
-      {closing && <Closeout m={m} />}
+      {m.status === 'closed' && (
+        <div className="banner warn row" style={{ justifyContent: 'space-between' }}>
+          <span>Former client matter · closed {m.closedOn ? `${fmtDate(m.closedOn)}, ${m.closedOn.slice(0, 4)}` : ''}. It stays searchable in Contacts and conflict checks.</span>
+          <button className="btn sm" onClick={() => { actions.reopenMatter(m.id); notify('Matter reopened'); }}>Reopen</button>
+        </div>
+      )}
+      {m.pncId && (
+        <div className="small muted">Came from PNC matter <button className="link" onClick={() => go('pnc', m.pncId)}>{lookup.pnc(m.pncId)?.title}</button></div>
+      )}
+      {(closing || m.status === 'closed') && <Closeout m={m} />}
 
       <div className="tabs" role="tablist">
-        {(['timeline', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
+        {(['timeline', 'notes', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+            {t[0].toUpperCase() + t.slice(1)}
+            {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
+          </button>
         ))}
       </div>
 
       {tab === 'timeline' && <Timeline m={m} area={area} />}
+      {tab === 'notes' && <NotesPanel target={{ kind: 'matter', id: m.id }} notes={m.notes} />}
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (
         <section className="panel">

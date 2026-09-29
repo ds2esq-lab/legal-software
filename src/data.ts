@@ -1,4 +1,10 @@
-// Domain model + sample data. Everything hangs off the Matter. All names below are fictional.
+// Domain model + sample data. All names below are fictional.
+//
+// Three kinds of records:
+//   Contacts       people and organizations, stored once
+//   PNC matters    prospects (potential new clients), first call → hired / not hired
+//   Client matters engaged work, open or former (closed)
+// Contacts attach to PNC matters and Client matters through Parties, each with a role.
 import { addDays, DEFAULT_AREAS, slug, todayISO, type MilestoneState } from './practice';
 
 export type BillingArrangement =
@@ -14,6 +20,58 @@ export const OUTSIDE_BALLS = [
   { id: 'court', name: 'Court' },
 ];
 
+export interface Note {
+  id: string;
+  at: string; // ISO datetime
+  author: string;
+  text: string;
+  pinned?: boolean;
+}
+
+export interface Contact {
+  id: string;
+  name: string; // "Last, First" for people; plain name for organizations
+  kind: 'person' | 'org';
+  phone: string;
+  email: string;
+  address?: string;
+  aka?: string; // maiden names, nicknames: searched by conflict checks
+  notes: Note[];
+}
+/** Kept for older screens: the primary client contact on a matter. */
+export type Client = Contact;
+
+/** Which side of a matter a role is on. Drives conflict-check severity. */
+export type RoleSide = 'client' | 'adverse' | 'neutral';
+export interface Role {
+  id: string;
+  name: string;
+  side: RoleSide;
+}
+
+export const DEFAULT_ROLES: Role[] = [
+  { id: 'client', name: 'Client', side: 'client' },
+  { id: 'spouse', name: 'Spouse / Partner', side: 'client' },
+  { id: 'pr', name: 'Personal Representative', side: 'client' },
+  { id: 'trustee', name: 'Trustee', side: 'client' },
+  { id: 'petitioner', name: 'Petitioner', side: 'client' },
+  { id: 'beneficiary', name: 'Beneficiary / Heir', side: 'neutral' },
+  { id: 'decedent', name: 'Decedent', side: 'neutral' },
+  { id: 'ward', name: 'Ward / Protected Person', side: 'neutral' },
+  { id: 'opposing', name: 'Opposing Party', side: 'adverse' },
+  { id: 'opp-counsel', name: 'Opposing Counsel', side: 'adverse' },
+  { id: 'court', name: 'Court / Clerk', side: 'neutral' },
+  { id: 'referral', name: 'Referral Source', side: 'neutral' },
+  { id: 'advisor', name: 'Financial Advisor / CPA', side: 'neutral' },
+  { id: 'other', name: 'Other', side: 'neutral' },
+];
+
+export interface Party {
+  contactId: string;
+  role: string; // Role id
+  primary?: boolean; // the main contact for the matter
+}
+
 export interface Closeout {
   financials: boolean;
   letterSent?: string;
@@ -25,7 +83,7 @@ export interface Matter {
   id: string;
   number: string;
   name: string;
-  clientId: string;
+  parties: Party[];
   areaId: string;
   stageId: string;
   planType?: string;
@@ -39,14 +97,11 @@ export interface Matter {
   milestones: Record<string, MilestoneState>;
   stalled: boolean;
   opened: string;
+  status: 'open' | 'closed';
+  closedOn?: string;
   closeout?: Closeout;
-}
-
-export interface Client {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
+  notes: Note[];
+  pncId?: string; // the PNC matter it came from
 }
 
 export interface TimeEntry {
@@ -126,9 +181,9 @@ export interface EventType {
   active: boolean;
 }
 
-// ---------- Intake (PNCs) ----------
+// ---------- PNC matters ----------
 
-export type PncStage = 'inquiry' | 'scheduled' | 'notes' | 'followup' | 'el' | 'hired' | 'future' | 'post' | 'lost';
+export type PncStage = 'inquiry' | 'scheduled' | 'notes' | 'followup' | 'el' | 'hired' | 'future' | 'post' | 'lost' | 'declined';
 
 export const PNC_STAGES: { id: PncStage; label: string; open: boolean }[] = [
   { id: 'inquiry', label: 'New inquiry', open: true },
@@ -140,14 +195,24 @@ export const PNC_STAGES: { id: PncStage; label: string; open: boolean }[] = [
   { id: 'future', label: 'Specific future date', open: false },
   { id: 'post', label: 'Cadence finished', open: false },
   { id: 'lost', label: 'Lost', open: false },
+  { id: 'declined', label: 'Declined (conflict)', open: false },
 ];
+
+export interface ConflictCheck {
+  date: string;
+  by: string;
+  terms: string[];
+  hits: number;
+  result: 'clear' | 'waived' | 'conflict';
+  note?: string;
+}
 
 export interface Pnc {
   id: string;
-  name: string;
-  phone: string;
+  title: string; // what it's about, e.g. "Estate plan inquiry"
+  parties: Party[];
   source: string;
-  areaId?: string; // best guess at practice area
+  areaId?: string;
   stage: PncStage;
   firstContact: string;
   consultAt?: string; // ISO datetime
@@ -156,6 +221,8 @@ export interface Pnc {
   touches: Record<string, string>; // touch key -> date done
   owner: string;
   matterId?: string; // set once hired
+  conflict?: ConflictCheck;
+  notes: Note[];
 }
 
 export interface Cadences {
@@ -181,7 +248,7 @@ export const TEAM = [
   { id: 'priya', name: 'Priya Shah', initials: 'PS', role: 'Probate Paralegal', rate: 150 },
 ];
 
-export const teamName = (id: string) => TEAM.find((t) => t.id === id)?.name ?? OUTSIDE_BALLS.find((b) => b.id === id)?.name ?? id;
+export const teamName = (id: string) => TEAM.find((t) => t.id === id)?.name ?? OUTSIDE_BALLS.find((b) => b.id === id)?.name ?? (id === 'system' ? 'Docket' : id);
 export const teamInitials = (id: string) =>
   TEAM.find((t) => t.id === id)?.initials ?? (id === 'client' ? 'CL' : id === 'third' ? '3P' : id === 'court' ? 'CT' : '?');
 export const isOutside = (ball: string) => OUTSIDE_BALLS.some((b) => b.id === ball);
@@ -197,19 +264,101 @@ const at = (offsetDays: number, hour = 9, minute = 0) => {
   return x.toISOString();
 };
 const day = (offset: number) => addDays(todayISO(), offset);
+const note = (id: string, daysAgo: number, author: string, text: string, pinned = false): Note => ({ id, at: at(-daysAgo, 10 + (daysAgo % 6), 15), author, text, pinned });
 
-const firstNames = ['Avery', 'Jordan', 'Morgan', 'Riley', 'Casey', 'Quinn', 'Harper', 'Rowan', 'Emerson', 'Sawyer', 'Hayden', 'Reese', 'Parker', 'Kendall', 'Blake', 'Drew', 'Elliot', 'Finley', 'Logan', 'Peyton', 'Sage', 'Tatum', 'Arden', 'Marlow'];
-const lastNames = ['Whitford', 'Okafor', 'Castellano', 'Brennan', 'Nakamura', 'Delacroix', 'Abernathy', 'Lindqvist', 'Moreau', 'Halvorsen', 'Pemberton', 'Vasquez', 'Oyelaran', 'Fairbanks', 'Kowalczyk', 'Arceneaux', 'Hollingsworth', 'Mancuso', 'Engstrom', 'Calloway', 'Whitcombe', 'Tanaka', 'Ellery', 'Donahue'];
+const contactsList: Contact[] = [];
+const person = (id: string, last: string, first: string, extra: Partial<Contact> = {}): Contact => {
+  const c: Contact = {
+    id,
+    name: `${last}, ${first}`,
+    kind: 'person',
+    email: `${first.toLowerCase()}.${last.toLowerCase().replace(/[^a-z]/g, '')}@example.com`,
+    phone: `(555) ${String(200 + ((id.length * 37 + last.length * 13 + first.length * 7) % 700)).padStart(3, '0')}-${String(1000 + ((last.charCodeAt(0) * 53 + first.charCodeAt(0) * 31 + id.length * 17) % 9000)).slice(-4)}`,
+    notes: [],
+    ...extra,
+  };
+  contactsList.push(c);
+  return c;
+};
+const org = (id: string, name: string, phone: string, email: string): Contact => {
+  const c: Contact = { id, name, kind: 'org', phone, email, notes: [] };
+  contactsList.push(c);
+  return c;
+};
 
-export const clients: Client[] = firstNames.map((f, i) => ({
-  id: `c${i + 1}`,
-  name: `${lastNames[i]}, ${f}`,
-  email: `${f.toLowerCase()}.${lastNames[i].toLowerCase()}@example.com`,
-  phone: `(555) ${String(200 + i * 17).padStart(3, '0')}-${String(1000 + i * 373).slice(-4)}`,
-}));
+// Current clients (primary contacts on open matters)
+const firstNames = ['Avery', 'Jordan', 'Morgan', 'Riley', 'Casey', 'Quinn', 'Harper', 'Rowan', 'Emerson', 'Sawyer', 'Hayden', 'Reese', 'Parker', 'Kendall', 'Blake', 'Drew', 'Elliot', 'Finley', 'Logan', 'Peyton', 'Sage', 'Tatum'];
+const lastNames = ['Whitford', 'Okafor', 'Castellano', 'Brennan', 'Nakamura', 'Delacroix', 'Abernathy', 'Lindqvist', 'Moreau', 'Halvorsen', 'Pemberton', 'Vasquez', 'Oyelaran', 'Fairbanks', 'Kowalczyk', 'Arceneaux', 'Hollingsworth', 'Mancuso', 'Engstrom', 'Calloway', 'Whitcombe', 'Tanaka'];
+firstNames.forEach((f, i) => person(`c${i + 1}`, lastNames[i], f));
+contactsList.find((c) => c.id === 'c1')!.notes.push(note('n-c1', 30, 'me', 'Prefers text over phone calls. Works nights; best reached after 3pm.'));
+contactsList.find((c) => c.id === 'c4')!.notes.push(note('n-c4', 60, 'dana', 'Brennan family: Riley is the oldest of four siblings. Mother’s estate is still open in another county.', true));
+
+// Other people on open matters
+person('x1', 'Whitford', 'Jamie', { aka: 'Jamie Sutter (maiden)' });
+person('x2', 'Brennan', 'Alex');
+person('x3', 'Delacroix', 'Sam');
+person('x4', 'Lindqvist', 'Harold');
+person('x5', 'Marsh', 'Evelyn');
+person('x6', 'Pritchard', 'Owen');
+org('x7', 'Pritchard & Cole LLP', '(555) 640-2200', 'intake@pritchardcole.example');
+org('x8', 'Probate Division, Clerk of Court', '(555) 910-3321', 'probate@clerk.example');
+person('x9', 'Halvorsen', 'Ingrid');
+person('x10', 'Greer', 'Nadia');
+org('x11', 'Greer Wealth Partners', '(555) 777-1030', 'office@greerwealth.example');
+
+// PNC contacts
+person('pc1', 'Rivera', 'Logan');
+person('pc2', 'Osei', 'Peyton');
+person('pc3', 'Lindgren', 'Sage');
+person('pc4', 'Pacheco', 'Tatum');
+person('pc5', 'Byrne', 'Arden');
+person('pc6', 'Hartmann', 'Marlow');
+person('pc7', 'Iwu', 'Blake');
+person('pc8', 'Sato', 'Drew');
+person('pc9', 'Keane', 'Finley');
+person('pc10', 'Molina', 'Reese');
+person('pc11', 'Osei', 'Kwame');
+person('pc12', 'Byrne', 'Colleen');
+
+// Former clients (closed matters) and their other parties
+const formerSeeds: [string, string, string, number, string?][] = [
+  // last, first, area, closed days ago, plan
+  ['Rivera', 'Logan', 'ep', 820, 'Solo Essential (Will)'],
+  ['Ashby', 'Marguerite', 'ep', 40, 'Couples Signature (Trust)'],
+  ['Bellamy', 'Theo', 'deed', 55, 'RTODD'],
+  ['Carrow', 'Nell', 'ep', 70, 'Solo Signature (Trust)'],
+  ['Dunleavy', 'Pat', 'fpet', 95, 'Formal Probate'],
+  ['Estrada', 'Luz', 'ep', 120, 'Couples Essential (Will)'],
+  ['Fitzgerald', 'Rory', 'biz', 140, 'LLC Organization'],
+  ['Goss', 'Wren', 'ep', 160, 'Solo Select (Deluxe Trust)'],
+  ['Hadley', 'Corin', 'gc', 200, 'Guardianship'],
+  ['Ibarra', 'Tomas', 'ep', 230, 'Couples Signature (Trust)'],
+  ['Jansen', 'Mieke', 'deed', 260, 'QCD'],
+  ['Kearney', 'Bram', 'ipet', 300, 'Informal Probate'],
+  ['Laramie', 'Cole', 'ep', 330, 'Will Only'],
+  ['Mbeki', 'Thandi', 'ep', 365, 'Couples Signature (Trust)'],
+  ['Nygaard', 'Sol', 'fpet', 410, 'Formal Probate'],
+  ['Ostrowski', 'Lena', 'ep', 450, 'Solo Signature (Trust)'],
+  ['Pell', 'August', 'fam', 500, 'Premarital'],
+  ['Quist', 'Ada', 'ep', 540, 'Couples Essential (Will)'],
+  ['Rourke', 'Dev', 'deed', 600, 'Gift'],
+  ['Stahl', 'Imogen', 'ep', 640, 'DPOA/AMD/HIPAA'],
+  ['Trinh', 'Vy', 'ep', 700, 'Couples Signature (Trust)'],
+  ['Ulloa', 'Marco', 'gc', 760, 'Conservatorship'],
+  ['Vance', 'Odette', 'ep', 900, 'Solo Essential (Will)'],
+  ['Wexler', 'Hal', 'biz', 980, 'Corporate Docs'],
+  ['Yarrow', 'June', 'ep', 1100, 'Couples Signature (Trust)'],
+  ['Zeller', 'Kip', 'ipet', 1200, 'Small Estate'],
+];
+const formerContactIds = formerSeeds.map(([last, first], i) => (last === 'Rivera' ? 'pc1' : person(`f${i + 1}`, last, first).id));
+person('fx1', 'Dunleavy', 'Margo'); // estranged sibling who objected in the Dunleavy probate
+
+export const contacts: Contact[] = contactsList;
+
+// ---------- Open client matters ----------
 
 type Seed = {
-  c: number;
+  c: string;
   area: string;
   stage: string;
   plan?: string;
@@ -221,44 +370,58 @@ type Seed = {
   stalled?: boolean;
   priority?: boolean;
   suspense?: [number, string];
+  more?: Party[];
+  notes?: Note[];
 };
 
 const seeds: Seed[] = [
-  { c: 1, area: 'ep', stage: 'Client Review', plan: 'Couples Signature (Trust)', ball: 'client', contactAgo: 4, done: [['Engaged', 40], ['Questionnaire Sent', 39], ['Questionnaire Submitted', 25], ['Questionnaire Discussion', 22], ['Drafts Sent', 17]], billing: { kind: 'flat', amount: 3950 } },
-  { c: 2, area: 'ep', stage: 'Initial Drafting', plan: 'Solo Signature (Trust)', ball: 'marcus', owner: 'marcus', contactAgo: 2, done: [['Engaged', 16], ['Questionnaire Sent', 15], ['Questionnaire Submitted', 8], ['Questionnaire Discussion', 6]], billing: { kind: 'flat', amount: 2950 }, priority: true },
-  { c: 3, area: 'ep', stage: 'Info Gathering', plan: 'Couples Essential (Will)', ball: 'client', contactAgo: 12, done: [['Engaged', 20], ['Questionnaire Sent', 19]], billing: { kind: 'flat', amount: 1850 } },
-  { c: 4, area: 'ep', stage: 'Signing', plan: 'Couples Select (Deluxe Trust)', ball: 'me', contactAgo: 1, done: [['Engaged', 70], ['Questionnaire Sent', 69], ['Questionnaire Submitted', 50], ['Questionnaire Discussion', 47], ['Drafts Sent', 43], ['Draft Discussion', 36], ['Final Docs Sent', 30]], billing: { kind: 'flat', amount: 5450 }, suspense: [1, 'Confirm signing witnesses'] },
-  { c: 5, area: 'ep', stage: 'Check Please', plan: 'Solo Essential (Will)', ball: 'me', contactAgo: 6, done: [['Engaged', 14], ['Questionnaire Sent', 13], ['Questionnaire Submitted', 6], ['Questionnaire Discussion', 4]], billing: { kind: 'flat', amount: 1250 } },
-  { c: 6, area: 'ep', stage: 'Client Review', plan: 'Couples Signature (Trust)', ball: 'client', contactAgo: 19, done: [['Engaged', 95], ['Questionnaire Sent', 94], ['Questionnaire Submitted', 70], ['Questionnaire Discussion', 66], ['Drafts Sent', 58]], billing: { kind: 'flat', amount: 3950 }, stalled: true },
-  { c: 7, area: 'ep', stage: 'Ready to Close', plan: 'Solo Signature (Trust)', ball: 'dana', contactAgo: 3, done: [['Engaged', 88], ['Questionnaire Sent', 87], ['Questionnaire Submitted', 70], ['Questionnaire Discussion', 68], ['Drafts Sent', 62], ['Draft Discussion', 55], ['Final Docs Sent', 50], ['Signing', 5], ['Closed', 2]], billing: { kind: 'flat', amount: 2950 } },
-  { c: 8, area: 'fpet', stage: 'Qualified', plan: 'Formal Probate', ball: 'priya', contactAgo: 8, done: [['Engaged', 120], ['Onboarding Call', 115], ['Petition Packet Submitted', 90], ['Qualified', 52], ['Notices Sent', 44]], billing: { kind: 'hourly', rate: 350 }, priority: true },
-  { c: 9, area: 'fpet', stage: 'Inventory Submitted', plan: 'Formal Probate', ball: 'court', contactAgo: 16, done: [['Engaged', 240], ['Onboarding Call', 236], ['Petition Packet Submitted', 200], ['Qualified', 170], ['Notices Sent', 160], ['Inventory Submitted', 115]], billing: { kind: 'hourly', rate: 350 } },
-  { c: 10, area: 'fpet', stage: 'Packet Submitted', plan: 'Formal Probate', ball: 'third', contactAgo: 23, done: [['Engaged', 45], ['Onboarding Call', 41], ['Petition Packet Submitted', 20]], billing: { kind: 'hourly', rate: 350 }, suspense: [0, 'Call clerk re: petition status'] },
-  { c: 11, area: 'fpet', stage: 'Accounting Submitted', plan: 'Trust Administration', ball: 'client', contactAgo: 5, done: [['Engaged', 420], ['Onboarding Call', 415], ['Petition Packet Submitted', 400], ['Qualified', 380], ['Notices Sent', 372], ['Inventory Submitted', 320], ['Accounting 1 Submitted', 10]], billing: { kind: 'hourly', rate: 350 } },
-  { c: 12, area: 'ipet', stage: 'Docs Recorded', plan: 'Informal Probate', ball: 'priya', contactAgo: 9, done: [['Engaged', 50], ['Onboarding Call', 47], ['Packet Submitted', 30], ['Docs Recorded', 13]], billing: { kind: 'flat', amount: 3500 } },
-  { c: 13, area: 'ipet', stage: 'Info Gathering', plan: 'Small Estate', ball: 'client', contactAgo: 15, done: [['Engaged', 18], ['Onboarding Call', 14]], billing: { kind: 'flat', amount: 1800 } },
-  { c: 14, area: 'gc', stage: 'Hearing Scheduled', plan: 'Guardianship', ball: 'court', contactAgo: 11, done: [['Engaged', 80], ['Questionnaire Submitted', 70], ['First Filing', 58], ['Second Filing', 30]], billing: { kind: 'hourly', rate: 350 }, suspense: [6, 'Hearing prep call with petitioner'] },
-  { c: 15, area: 'gc', stage: 'Info Gathering', plan: 'GAL', ball: 'dana', contactAgo: 22, done: [['Engaged', 9]], billing: { kind: 'hourly', rate: 250 } },
-  { c: 16, area: 'gc', stage: 'Draft Stage 1', plan: 'Conservatorship', ball: 'marcus', owner: 'marcus', contactAgo: 4, done: [['Engaged', 30], ['Questionnaire Submitted', 16]], billing: { kind: 'hourly', rate: 350 } },
-  { c: 17, area: 'deed', stage: 'Drafting', plan: 'RTODD', ball: 'dana', contactAgo: 2, done: [['Engaged', 8], ['Have Info', 5]], billing: { kind: 'flat', amount: 650 } },
-  { c: 18, area: 'deed', stage: 'Ready to Sign', plan: 'QCD', ball: 'client', contactAgo: 6, done: [['Engaged', 21], ['Have Info', 18], ['Drafted', 15], ['Approved', 12]], billing: { kind: 'flat', amount: 650 } },
-  { c: 19, area: 'deed', stage: 'Signed', plan: 'Gift', ball: 'dana', contactAgo: 1, done: [['Engaged', 25], ['Have Info', 22], ['Drafted', 19], ['Approved', 16], ['Signed', 3]], billing: { kind: 'flat', amount: 650 } },
-  { c: 20, area: 'biz', stage: 'Info Gathering', plan: 'LLC Organization', ball: 'client', owner: 'marcus', contactAgo: 13, done: [['Engaged', 15]], billing: { kind: 'hybrid', amount: 950, rate: 250, covers: 'Articles, operating agreement, EIN' } },
-  { c: 21, area: 'biz', stage: 'Client Review', plan: 'LLC Operating Agreement', ball: 'client', owner: 'marcus', contactAgo: 8, done: [['Engaged', 30], ['Questionnaire Submitted', 22], ['Questionnaire Discussion', 20], ['Drafts Sent', 14]], billing: { kind: 'flat', amount: 1500 } },
-  { c: 22, area: 'fam', stage: 'Initial Drafting', plan: 'Premarital', ball: 'me', contactAgo: 3, done: [['Engaged', 12], ['Questionnaire Submitted', 3]], billing: { kind: 'flat', amount: 2500 }, priority: true },
+  { c: 'c1', area: 'ep', stage: 'Client Review', plan: 'Couples Signature (Trust)', ball: 'client', contactAgo: 4, done: [['Engaged', 40], ['Questionnaire Sent', 39], ['Questionnaire Submitted', 25], ['Questionnaire Discussion', 22], ['Drafts Sent', 17]], billing: { kind: 'flat', amount: 3950 },
+    more: [{ contactId: 'x1', role: 'spouse' }, { contactId: 'x10', role: 'referral' }, { contactId: 'x11', role: 'advisor' }],
+    notes: [note('n-m1a', 17, 'me', 'Drafts sent. Clients want to revisit successor trustee order; kids are 19 and 23.'), note('n-m1b', 30, 'dana', 'Funding: 2 brokerage accounts at Greer Wealth, house, rental condo. Deed for condo needed after signing.', true)] },
+  { c: 'c2', area: 'ep', stage: 'Initial Drafting', plan: 'Solo Signature (Trust)', ball: 'marcus', owner: 'marcus', contactAgo: 2, done: [['Engaged', 16], ['Questionnaire Sent', 15], ['Questionnaire Submitted', 8], ['Questionnaire Discussion', 6]], billing: { kind: 'flat', amount: 2950 }, priority: true,
+    notes: [note('n-m2', 6, 'marcus', 'Questionnaire call done. Wants a pet trust provision for two horses.')] },
+  { c: 'c3', area: 'ep', stage: 'Info Gathering', plan: 'Couples Essential (Will)', ball: 'client', contactAgo: 12, done: [['Engaged', 20], ['Questionnaire Sent', 19]], billing: { kind: 'flat', amount: 1850 } },
+  { c: 'c4', area: 'ep', stage: 'Signing', plan: 'Couples Select (Deluxe Trust)', ball: 'me', contactAgo: 1, done: [['Engaged', 70], ['Questionnaire Sent', 69], ['Questionnaire Submitted', 50], ['Questionnaire Discussion', 47], ['Drafts Sent', 43], ['Draft Discussion', 36], ['Final Docs Sent', 30]], billing: { kind: 'flat', amount: 5450 }, suspense: [1, 'Confirm signing witnesses'],
+    more: [{ contactId: 'x2', role: 'spouse' }] },
+  { c: 'c5', area: 'ep', stage: 'Check Please', plan: 'Solo Essential (Will)', ball: 'me', contactAgo: 6, done: [['Engaged', 14], ['Questionnaire Sent', 13], ['Questionnaire Submitted', 6], ['Questionnaire Discussion', 4]], billing: { kind: 'flat', amount: 1250 } },
+  { c: 'c6', area: 'ep', stage: 'Client Review', plan: 'Couples Signature (Trust)', ball: 'client', contactAgo: 19, done: [['Engaged', 95], ['Questionnaire Sent', 94], ['Questionnaire Submitted', 70], ['Questionnaire Discussion', 66], ['Drafts Sent', 58]], billing: { kind: 'flat', amount: 3950 }, stalled: true,
+    more: [{ contactId: 'x3', role: 'spouse' }], notes: [note('n-m6', 19, 'dana', 'Left voicemail and emailed. Third attempt. Spouse had surgery in August; may explain the delay.')] },
+  { c: 'c7', area: 'ep', stage: 'Ready to Close', plan: 'Solo Signature (Trust)', ball: 'dana', contactAgo: 3, done: [['Engaged', 88], ['Questionnaire Sent', 87], ['Questionnaire Submitted', 70], ['Questionnaire Discussion', 68], ['Drafts Sent', 62], ['Draft Discussion', 55], ['Final Docs Sent', 50], ['Signing', 5], ['Closed', 2]], billing: { kind: 'flat', amount: 2950 } },
+  { c: 'c8', area: 'fpet', stage: 'Qualified', plan: 'Formal Probate', ball: 'priya', contactAgo: 8, done: [['Engaged', 120], ['Onboarding Call', 115], ['Petition Packet Submitted', 90], ['Qualified', 52], ['Notices Sent', 44]], billing: { kind: 'hourly', rate: 350 }, priority: true,
+    more: [{ contactId: 'x4', role: 'decedent' }, { contactId: 'x8', role: 'court' }], notes: [note('n-m8', 44, 'priya', 'Notice to creditors published. Claims period running.')] },
+  { c: 'c9', area: 'fpet', stage: 'Inventory Submitted', plan: 'Formal Probate', ball: 'court', contactAgo: 16, done: [['Engaged', 240], ['Onboarding Call', 236], ['Petition Packet Submitted', 200], ['Qualified', 170], ['Notices Sent', 160], ['Inventory Submitted', 115]], billing: { kind: 'hourly', rate: 350 } },
+  { c: 'c10', area: 'fpet', stage: 'Packet Submitted', plan: 'Formal Probate', ball: 'third', contactAgo: 23, done: [['Engaged', 45], ['Onboarding Call', 41], ['Petition Packet Submitted', 20]], billing: { kind: 'hourly', rate: 350 }, suspense: [0, 'Call clerk re: petition status'],
+    more: [{ contactId: 'x9', role: 'decedent' }, { contactId: 'x6', role: 'opp-counsel' }, { contactId: 'x7', role: 'opp-counsel' }, { contactId: 'x5', role: 'opposing' }],
+    notes: [note('n-m10', 20, 'me', 'Decedent’s partner (Evelyn Marsh) has objected through counsel, claims an interest in the lake house.', true)] },
+  { c: 'c11', area: 'fpet', stage: 'Accounting Submitted', plan: 'Trust Administration', ball: 'client', contactAgo: 5, done: [['Engaged', 420], ['Onboarding Call', 415], ['Petition Packet Submitted', 400], ['Qualified', 380], ['Notices Sent', 372], ['Inventory Submitted', 320], ['Accounting 1 Submitted', 10]], billing: { kind: 'hourly', rate: 350 } },
+  { c: 'c12', area: 'ipet', stage: 'Docs Recorded', plan: 'Informal Probate', ball: 'priya', contactAgo: 9, done: [['Engaged', 50], ['Onboarding Call', 47], ['Packet Submitted', 30], ['Docs Recorded', 13]], billing: { kind: 'flat', amount: 3500 } },
+  { c: 'c13', area: 'ipet', stage: 'Info Gathering', plan: 'Small Estate', ball: 'client', contactAgo: 15, done: [['Engaged', 18], ['Onboarding Call', 14]], billing: { kind: 'flat', amount: 1800 } },
+  { c: 'c14', area: 'gc', stage: 'Hearing Scheduled', plan: 'Guardianship', ball: 'court', contactAgo: 11, done: [['Engaged', 80], ['Questionnaire Submitted', 70], ['First Filing', 58], ['Second Filing', 30]], billing: { kind: 'hourly', rate: 350 }, suspense: [6, 'Hearing prep call with petitioner'] },
+  { c: 'c15', area: 'gc', stage: 'Info Gathering', plan: 'GAL', ball: 'dana', contactAgo: 22, done: [['Engaged', 9]], billing: { kind: 'hourly', rate: 250 } },
+  { c: 'c16', area: 'gc', stage: 'Draft Stage 1', plan: 'Conservatorship', ball: 'marcus', owner: 'marcus', contactAgo: 4, done: [['Engaged', 30], ['Questionnaire Submitted', 16]], billing: { kind: 'hourly', rate: 350 } },
+  { c: 'c17', area: 'deed', stage: 'Drafting', plan: 'RTODD', ball: 'dana', contactAgo: 2, done: [['Engaged', 8], ['Have Info', 5]], billing: { kind: 'flat', amount: 650 } },
+  { c: 'c18', area: 'deed', stage: 'Ready to Sign', plan: 'QCD', ball: 'client', contactAgo: 6, done: [['Engaged', 21], ['Have Info', 18], ['Drafted', 15], ['Approved', 12]], billing: { kind: 'flat', amount: 650 } },
+  { c: 'c19', area: 'deed', stage: 'Signed', plan: 'Gift', ball: 'dana', contactAgo: 1, done: [['Engaged', 25], ['Have Info', 22], ['Drafted', 19], ['Approved', 16], ['Signed', 3]], billing: { kind: 'flat', amount: 650 } },
+  { c: 'c20', area: 'biz', stage: 'Info Gathering', plan: 'LLC Organization', ball: 'client', owner: 'marcus', contactAgo: 13, done: [['Engaged', 15]], billing: { kind: 'hybrid', amount: 950, rate: 250, covers: 'Articles, operating agreement, EIN' } },
+  { c: 'c21', area: 'biz', stage: 'Client Review', plan: 'LLC Operating Agreement', ball: 'client', owner: 'marcus', contactAgo: 8, done: [['Engaged', 30], ['Questionnaire Submitted', 22], ['Questionnaire Discussion', 20], ['Drafts Sent', 14]], billing: { kind: 'flat', amount: 1500 } },
+  { c: 'c22', area: 'fam', stage: 'Initial Drafting', plan: 'Premarital', ball: 'me', contactAgo: 3, done: [['Engaged', 12], ['Questionnaire Submitted', 3]], billing: { kind: 'flat', amount: 2500 }, priority: true },
 ];
 
-export const matters: Matter[] = seeds.map((s, i) => {
+const label = (areaId: string, plan: string | undefined, fallback: string) =>
+  areaId === 'ep' ? 'Estate Plan' : areaId === 'gc' ? (plan ?? 'Guardianship') : areaId === 'fpet' || areaId === 'ipet' ? 'Estate' : plan ?? fallback;
+
+const openMatters: Matter[] = seeds.map((s, i) => {
   const area = DEFAULT_AREAS.find((a) => a.id === s.area)!;
   const milestones: Record<string, MilestoneState> = {};
   for (const [name, ago] of s.done) milestones[slug(name)] = { done: day(-ago) };
   const engaged = s.done.find(([n]) => n === 'Engaged')?.[1] ?? 0;
-  const label = area.id === 'ep' ? 'Estate Plan' : area.id === 'gc' ? (s.plan ?? 'Guardianship') : area.id === 'fpet' || area.id === 'ipet' ? 'Estate' : s.plan ?? area.name;
+  const primary = contactsList.find((c) => c.id === s.c)!;
+  const role = s.area === 'fpet' || s.area === 'ipet' ? 'pr' : s.area === 'gc' ? 'petitioner' : 'client';
   return {
     id: `m${i + 1}`,
     number: `2026-${String(101 + i).padStart(4, '0')}`,
-    name: `${clients[s.c - 1].name.split(',')[0]} ${label}`,
-    clientId: `c${s.c}`,
+    name: `${primary.name.split(',')[0]} ${label(s.area, s.plan, area.name)}`,
+    parties: [{ contactId: s.c, role, primary: true }, ...(s.more ?? [])],
     areaId: s.area,
     stageId: slug(s.stage),
     planType: s.plan,
@@ -272,21 +435,65 @@ export const matters: Matter[] = seeds.map((s, i) => {
     milestones,
     stalled: !!s.stalled,
     opened: day(-engaged),
+    status: 'open',
+    notes: s.notes ?? [],
   };
 });
 
+// ---------- Former client matters ----------
+
+const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, plan], i) => {
+  const area = DEFAULT_AREAS.find((a) => a.id === areaId)!;
+  const span = areaId === 'fpet' ? 220 : areaId === 'gc' ? 180 : areaId === 'deed' ? 35 : 85;
+  const openedAgo = closedAgo + span;
+  const year = new Date(day(-openedAgo)).getFullYear();
+  const parties: Party[] = [{ contactId: formerContactIds[i], role: areaId === 'fpet' || areaId === 'ipet' ? 'pr' : areaId === 'gc' ? 'petitioner' : 'client', primary: true }];
+  if (last === 'Dunleavy') parties.push({ contactId: 'fx1', role: 'opposing' });
+  const lastStage = area.stages[area.stages.length - 1];
+  return {
+    id: `fm${i + 1}`,
+    number: `${year}-${String(300 + i * 7).padStart(4, '0')}`,
+    name: `${last} ${label(areaId, plan, area.name)}`,
+    parties,
+    areaId,
+    stageId: lastStage.id,
+    planType: plan,
+    owner: i % 5 === 0 ? 'marcus' : 'me',
+    ball: 'me',
+    billing: { kind: 'flat', amount: 0 },
+    priority: false,
+    lastContact: day(-closedAgo),
+    milestones: { engaged: { done: day(-openedAgo) }, closed: { done: day(-closedAgo) } },
+    stalled: false,
+    opened: day(-openedAgo),
+    status: 'closed',
+    closedOn: day(-closedAgo),
+    closeout: { financials: true, letterSent: day(-closedAgo + 3), review: i % 4 === 0 ? 'Ask First' : 'Definitely', reviewRequested: i % 3 === 0 ? day(-closedAgo + 5) : undefined },
+    notes: last === 'Dunleavy' ? [note('n-fm-d', closedAgo + 30, 'me', 'Sister (Margo Dunleavy) contested the will; settled at mediation. Do not represent Margo in anything related.', true)] : [],
+  };
+});
+
+export const matters: Matter[] = [...openMatters, ...formerMatters];
+
+// ---------- PNC matters ----------
+
+const pp = (id: string, role = 'client', primary = true): Party => ({ contactId: id, role, primary });
+
 export const pncs: Pnc[] = [
-  { id: 'p1', name: 'Rivera, Logan', phone: '(555) 410-2231', source: 'Website form', areaId: 'ep', stage: 'inquiry', firstContact: day(-4), touches: { 's:2': day(-2) }, owner: 'dana' },
-  { id: 'p2', name: 'Osei, Peyton', phone: '(555) 410-8820', source: 'Referral: past client', areaId: 'fpet', stage: 'inquiry', firstContact: day(-1), touches: {}, owner: 'dana' },
-  { id: 'p3', name: 'Lindgren, Sage', phone: '(555) 410-1177', source: 'Google', areaId: 'ep', stage: 'scheduled', firstContact: day(-6), consultAt: at(4, 10), touches: { 'c:-10': day(-6) }, owner: 'me' },
-  { id: 'p4', name: 'Pacheco, Tatum', phone: '(555) 410-6604', source: 'Seminar', areaId: 'ep', stage: 'scheduled', firstContact: day(-9), consultAt: at(1, 14), touches: { 'c:-10': day(-9), 'c:-4': day(-3) }, owner: 'me' },
-  { id: 'p5', name: 'Byrne, Arden', phone: '(555) 410-3390', source: 'Website form', areaId: 'gc', stage: 'notes', firstContact: day(-12), consultAt: at(-1, 11), touches: {}, owner: 'me' },
-  { id: 'p6', name: 'Hartmann, Marlow', phone: '(555) 410-5512', source: 'Referral: financial advisor', areaId: 'ep', stage: 'followup', firstContact: day(-20), consultAt: at(-5, 15), touches: { 'f:2': day(-3) }, owner: 'me' },
-  { id: 'p7', name: 'Iwu, Blake', phone: '(555) 410-7745', source: 'Google', areaId: 'deed', stage: 'followup', firstContact: day(-15), consultAt: at(-8, 9, 30), touches: { 'f:2': day(-6), 'f:5': day(-3) }, owner: 'dana' },
-  { id: 'p8', name: 'Sato, Drew', phone: '(555) 410-9001', source: 'Referral: past client', areaId: 'ep', stage: 'el', firstContact: day(-18), consultAt: at(-9, 13), elSent: day(-3), touches: { 'f:2': day(-7), 'e:1': day(-2) }, owner: 'me' },
-  { id: 'p9', name: 'Keane, Finley', phone: '(555) 410-2468', source: 'Website form', areaId: 'biz', stage: 'future', firstContact: day(-40), consultAt: at(-30, 10), futureDate: day(45), touches: {}, owner: 'marcus' },
-  { id: 'p10', name: 'Molina, Reese', phone: '(555) 410-1357', source: 'Google', areaId: 'ep', stage: 'lost', firstContact: day(-35), consultAt: at(-28, 10), touches: {}, owner: 'me' },
+  { id: 'p1', title: 'Update estate plan after divorce', parties: [pp('pc1')], source: 'Returning client', areaId: 'ep', stage: 'inquiry', firstContact: day(-4), touches: { 's:2': day(-2) }, owner: 'dana', notes: [note('n-p1', 4, 'dana', 'Former client (2024 will). Divorced last year, wants a trust now.')] },
+  { id: 'p2', title: 'Probate of mother’s estate; sibling dispute', parties: [pp('pc2', 'pr'), pp('pc11', 'beneficiary', false), { contactId: 'c4', role: 'opposing' }], source: 'Referral: past client', areaId: 'fpet', stage: 'inquiry', firstContact: day(-1), touches: {}, owner: 'dana',
+    notes: [note('n-p2', 1, 'dana', 'Caller says her cousin Riley Brennan is contesting the will. Ran conflict check. Needs attorney review before booking.')] },
+  { id: 'p3', title: 'Trust for blended family', parties: [pp('pc3')], source: 'Google', areaId: 'ep', stage: 'scheduled', firstContact: day(-6), consultAt: at(4, 10), touches: { 'c:-10': day(-6) }, owner: 'me', notes: [], conflict: { date: day(-6), by: 'dana', terms: ['Lindgren, Sage'], hits: 0, result: 'clear' } },
+  { id: 'p4', title: 'Wills and powers of attorney', parties: [pp('pc4')], source: 'Seminar', areaId: 'ep', stage: 'scheduled', firstContact: day(-9), consultAt: at(1, 14), touches: { 'c:-10': day(-9), 'c:-4': day(-3) }, owner: 'me', notes: [], conflict: { date: day(-9), by: 'dana', terms: ['Pacheco, Tatum'], hits: 0, result: 'clear' } },
+  { id: 'p5', title: 'Guardianship of adult son', parties: [pp('pc5', 'petitioner'), pp('pc12', 'ward', false)], source: 'Website form', areaId: 'gc', stage: 'notes', firstContact: day(-12), consultAt: at(-1, 11), touches: {}, owner: 'me', notes: [], conflict: { date: day(-12), by: 'dana', terms: ['Byrne, Arden', 'Byrne, Colleen'], hits: 0, result: 'clear' } },
+  { id: 'p6', title: 'Trust; rental properties', parties: [pp('pc6')], source: 'Referral: financial advisor', areaId: 'ep', stage: 'followup', firstContact: day(-20), consultAt: at(-5, 15), touches: { 'f:2': day(-3) }, owner: 'me', notes: [note('n-p6', 5, 'me', 'Good fit for Signature Trust. Quoted couples price. Wants to talk to spouse first.')], conflict: { date: day(-20), by: 'dana', terms: ['Hartmann, Marlow'], hits: 0, result: 'clear' } },
+  { id: 'p7', title: 'Deed to add daughter', parties: [pp('pc7')], source: 'Google', areaId: 'deed', stage: 'followup', firstContact: day(-15), consultAt: at(-8, 9, 30), touches: { 'f:2': day(-6), 'f:5': day(-3) }, owner: 'dana', notes: [], conflict: { date: day(-15), by: 'dana', terms: ['Iwu, Blake'], hits: 0, result: 'clear' } },
+  { id: 'p8', title: 'Estate plan, first home', parties: [pp('pc8')], source: 'Referral: past client', areaId: 'ep', stage: 'el', firstContact: day(-18), consultAt: at(-9, 13), elSent: day(-3), touches: { 'f:2': day(-7), 'e:1': day(-2) }, owner: 'me', notes: [], conflict: { date: day(-18), by: 'dana', terms: ['Sato, Drew'], hits: 0, result: 'clear' } },
+  { id: 'p9', title: 'LLC for consulting business', parties: [pp('pc9')], source: 'Website form', areaId: 'biz', stage: 'future', firstContact: day(-40), consultAt: at(-30, 10), futureDate: day(45), touches: {}, owner: 'marcus', notes: [note('n-p9', 30, 'marcus', 'Launching in January. Call back mid-November.')], conflict: { date: day(-40), by: 'dana', terms: ['Keane, Finley'], hits: 0, result: 'clear' } },
+  { id: 'p10', title: 'Will review', parties: [pp('pc10')], source: 'Google', areaId: 'ep', stage: 'lost', firstContact: day(-35), consultAt: at(-28, 10), touches: {}, owner: 'me', notes: [note('n-p10', 20, 'me', 'Went with an online service on price.')], conflict: { date: day(-35), by: 'dana', terms: ['Molina, Reese'], hits: 0, result: 'clear' } },
 ];
+
+// ---------- Everything else (unchanged from v1, pointed at the new matters) ----------
 
 export const timeEntries: TimeEntry[] = [
   { id: 't1', matterId: 'm8', date: day(-2), actualMinutes: 47, description: 'Review creditor claims; calendar objection deadline', user: 'me', billable: true, invoiced: false, source: 'timer' },
@@ -325,20 +532,21 @@ export const events: CalEvent[] = [
 
 export const messages: Message[] = [
   { id: 'g1', channel: 'general', author: 'dana', text: 'Originals for tomorrow’s signing are in the vault drawer.', at: at(0, 8, 12), clientVisible: false },
-  { id: 'i1', channel: 'intake', author: 'dana', text: 'New website inquiry, probate. Conflict check clean. Trying to book a consult.', at: at(-1, 9, 40), clientVisible: false },
+  { id: 'i1', channel: 'intake', author: 'dana', text: 'New probate inquiry flagged a possible conflict (adverse party is a current client). Needs your review.', at: at(-1, 9, 40), clientVisible: false },
   { id: 'm1a', channel: 'm1', author: 'client', text: 'We got the drafts. Can we change the successor trustee order?', at: at(-1, 11, 2), clientVisible: true },
   { id: 'm1b', channel: 'm1', author: 'me', text: 'Yes, easy change. We’ll walk through it on the review call.', at: at(-1, 11, 30), clientVisible: true },
   { id: 'm1c', channel: 'm1', author: 'marcus', text: 'Trustee order change noted in the revision list.', at: at(-1, 16, 20), clientVisible: false },
 ];
 
+const c8 = contactsList.find((c) => c.id === 'c8')!;
 export const calls: CallLog[] = [
-  { id: 'c1', matterId: 'm8', contact: clients[7].name, number: clients[7].phone, direction: 'in', at: at(-1, 15, 10), seconds: 781, logged: true },
-  { id: 'c2', matterId: 'm10', contact: 'Probate clerk', number: '(555) 910-3321', direction: 'out', at: at(-2, 10, 40), seconds: 262, logged: false },
-  { id: 'c3', contact: 'Unknown caller', number: '(555) 118-0042', direction: 'in', at: at(-2, 12, 5), seconds: 95, logged: false },
+  { id: 'cl1', matterId: 'm8', contact: c8.name, number: c8.phone, direction: 'in', at: at(-1, 15, 10), seconds: 781, logged: true },
+  { id: 'cl2', matterId: 'm10', contact: 'Probate clerk', number: '(555) 910-3321', direction: 'out', at: at(-2, 10, 40), seconds: 262, logged: false },
+  { id: 'cl3', contact: 'Unknown caller', number: '(555) 118-0042', direction: 'in', at: at(-2, 12, 5), seconds: 95, logged: false },
 ];
 
 export const eventTypes: EventType[] = [
-  { id: 'et1', name: 'New client consultation', minutes: 60, bufferBefore: 10, bufferAfter: 15, minNoticeHours: 24, dailyCap: 3, who: 'prospects', creates: 'Prospect in Intake with pre-consult reminders', questions: ['What can we help you with?', 'Names of any other people involved (for conflict check)', 'Any deadline you are aware of?'], active: true },
+  { id: 'et1', name: 'New client consultation', minutes: 60, bufferBefore: 10, bufferAfter: 15, minNoticeHours: 24, dailyCap: 3, who: 'prospects', creates: 'PNC matter with conflict check + pre-consult reminders', questions: ['What can we help you with?', 'Names of any other people involved (for conflict check)', 'Any deadline you are aware of?'], active: true },
   { id: 'et2', name: 'Client check-in call', minutes: 20, bufferBefore: 0, bufferAfter: 10, minNoticeHours: 4, dailyCap: 6, who: 'clients', creates: 'Event on the matter, logged as client contact', questions: ['What would you like to cover?'], active: true },
   { id: 'et3', name: 'Signing ceremony', minutes: 60, bufferBefore: 15, bufferAfter: 15, minNoticeHours: 48, dailyCap: 2, who: 'clients', creates: 'Event on the matter + prep task for paralegal', questions: ['Will anyone else be attending?'], active: true },
 ];

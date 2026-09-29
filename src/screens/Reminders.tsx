@@ -143,7 +143,7 @@ export default function Reminders() {
             <label htmlFor="r-matter">Matter</label>
             <select className="input" id="r-matter" value={matter} onChange={(e) => setMatter(e.target.value)}>
               <option value="">None</option>
-              {s.matters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {s.matters.filter((m) => m.status === 'open').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
           <button className="btn primary" type="submit">Add</button>

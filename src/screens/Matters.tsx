@@ -3,7 +3,8 @@ import { useStore } from '../store';
 import { TEAM, OUTSIDE_BALLS, type Matter } from '../data';
 import { dueMilestones } from '../calc';
 import { contactState } from '../practice';
-import { BallSelect, ContactPill, DateField, DuePill, PageHead, Person } from '../ui';
+import { BallSelect, ContactPill, DateField, DuePill, fmtDate, PageHead, Person } from '../ui';
+import { CopyText } from '../people';
 
 type View = 'board' | 'table';
 
@@ -19,8 +20,55 @@ function NextDue({ m }: { m: Matter }) {
   );
 }
 
+function FormerMatters() {
+  const { s, lookup, go, actions, notify } = useStore();
+  const [q, setQ] = useState('');
+  const [areaId, setAreaId] = useState('all');
+  const term = q.trim().toLowerCase();
+  const rows = s.matters
+    .filter((m) => m.status === 'closed')
+    .filter((m) => areaId === 'all' || m.areaId === areaId)
+    .filter((m) => !term || m.name.toLowerCase().includes(term) || m.parties.some((p) => lookup.contact(p.contactId)?.name.toLowerCase().includes(term)) || m.number.includes(term))
+    .sort((a, b) => (b.closedOn ?? '').localeCompare(a.closedOn ?? ''));
+  return (
+    <>
+      <div className="row">
+        <input className="input" style={{ flex: '1 1 260px', maxWidth: 420 }} id="former-search" aria-label="Search former clients" placeholder="Search former clients by name or matter number…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="input" style={{ width: 'auto' }} id="former-area" aria-label="Practice area" value={areaId} onChange={(e) => setAreaId(e.target.value)}>
+          <option value="all">All practice areas</option>
+          {s.areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <span className="small muted">{rows.length} former matter{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      <section className="panel table-wrap">
+        <table className="t">
+          <thead><tr><th>Matter</th><th>Client</th><th>Phone</th><th>Area</th><th>Engaged</th><th>Closed</th><th>Review</th><th /></tr></thead>
+          <tbody>
+            {rows.map((m) => {
+              const c = lookup.clientOf(m);
+              return (
+                <tr key={m.id}>
+                  <td style={{ minWidth: 180 }}><button className="link" onClick={() => go('matter', m.id)}>{m.name}</button><div className="small muted num">{m.number}{m.planType ? ` · ${m.planType}` : ''}</div></td>
+                  <td>{c && <button className="link" onClick={() => go('contact', c.id)}>{c.name}</button>}</td>
+                  <td><CopyText text={c?.phone ?? ''} label="phone" /></td>
+                  <td>{lookup.areaOf(m).name}</td>
+                  <td className="num">{fmtDate(m.opened)} {m.opened.slice(0, 4)}</td>
+                  <td className="num">{m.closedOn ? `${fmtDate(m.closedOn)} ${m.closedOn.slice(0, 4)}` : '—'}</td>
+                  <td>{m.closeout?.review ? <span className={`pill ${m.closeout.review === 'Hell No' ? 'danger' : m.closeout.review === 'Ask First' ? 'warn' : 'ok'}`}>{m.closeout.review}</span> : '—'}</td>
+                  <td className="r"><button className="btn sm ghost" onClick={() => { actions.reopenMatter(m.id); notify(`${m.name} reopened`); }}>Reopen</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
+    </>
+  );
+}
+
 export default function Matters() {
   const { s, actions, lookup, go, notify } = useStore();
+  const [scope, setScope] = useState<'open' | 'former'>('open');
   const [areaId, setAreaId] = useState<string>('ep');
   const [view, setView] = useState<View>('board');
   const [ball, setBall] = useState('all');
@@ -29,7 +77,8 @@ export default function Matters() {
   const [overCol, setOverCol] = useState<string | null>(null);
 
   const area = areaId === 'all' ? undefined : lookup.area(areaId);
-  const list = s.matters
+  const open = s.matters.filter((m) => m.status === 'open');
+  const list = open
     .filter((m) => areaId === 'all' || m.areaId === areaId)
     .filter((m) => ball === 'all' || m.ball === ball)
     .filter((m) => showStalled || !m.stalled);
@@ -52,6 +101,7 @@ export default function Matters() {
         <thead>
           <tr>
             <th>Matter</th>
+            <th>Client</th>
             <th>Stage</th>
             <th>Whose Ball</th>
             <th>Contact</th>
@@ -70,6 +120,9 @@ export default function Matters() {
                     {m.planType ?? a.name} · <span className="num">{m.number}</span>
                     {m.stalled && <span className="pill warn" style={{ marginLeft: 6 }}>Stalled</span>}
                   </div>
+                </td>
+                <td style={{ minWidth: 150 }}>
+                  {(() => { const c = lookup.clientOf(m); return c ? <><button className="link small" onClick={() => go('contact', c.id)}>{c.name}</button><div className="small"><CopyText text={c.phone} label="phone" /></div></> : null; })()}
                 </td>
                 <td>
                   <select className="input small tight" aria-label="Stage" id={`stage-${m.id}`} value={m.stageId} onChange={(e) => move(m, e.target.value)}>
@@ -99,7 +152,12 @@ export default function Matters() {
 
   return (
     <>
-      <PageHead title="Matters" sub="Each practice area has its own stages, milestones and contact timer. Change them any time in Settings.">
+      <PageHead title="Client matters" sub="Open matters by practice area, and every former client. Each practice area has its own stages, milestones and contact timer.">
+        <div className="seg" role="group" aria-label="Open or former">
+          <button aria-pressed={scope === 'open'} onClick={() => setScope('open')}>Open <span className="num">{open.length}</span></button>
+          <button aria-pressed={scope === 'former'} onClick={() => setScope('former')}>Former clients <span className="num">{s.matters.length - open.length}</span></button>
+        </div>
+        {scope === 'open' && <>
         <select className="input" style={{ width: 'auto' }} id="ball-filter" aria-label="Filter by whose ball" value={ball} onChange={(e) => setBall(e.target.value)}>
           <option value="all">Whose Ball: anyone</option>
           {TEAM.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -112,15 +170,17 @@ export default function Matters() {
           <button aria-pressed={view === 'board'} disabled={areaId === 'all'} onClick={() => setView('board')}>Board</button>
           <button aria-pressed={view === 'table' || areaId === 'all'} onClick={() => setView('table')}>Table</button>
         </div>
+        </>}
       </PageHead>
 
+      {scope === 'former' ? <FormerMatters /> : <>
       <div className="tabs" role="tablist" aria-label="Practice area">
         <button role="tab" aria-selected={areaId === 'all'} onClick={() => setAreaId('all')}>
-          All <span className="num muted">{s.matters.length}</span>
+          All <span className="num muted">{open.length}</span>
         </button>
         {s.areas.map((a) => (
           <button key={a.id} role="tab" aria-selected={areaId === a.id} onClick={() => setAreaId(a.id)}>
-            {a.name} <span className="num muted">{s.matters.filter((m) => m.areaId === a.id).length}</span>
+            {a.name} <span className="num muted">{open.filter((m) => m.areaId === a.id).length}</span>
           </button>
         ))}
       </div>
@@ -203,6 +263,7 @@ export default function Matters() {
           })}
         </div>
       )}
+      </>}
     </>
   );
 }

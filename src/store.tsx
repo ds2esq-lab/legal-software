@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as seed from './data';
-import type { CalEvent, CallLog, Cadences, Matter, Message, Pnc, Reminder, TimeEntry } from './data';
+import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Reminder, Role, TimeEntry } from './data';
 import { DEFAULT_BILLING, type BillingSettings } from './billing';
 import { DEFAULT_AREAS, newId, slug, todayISO, type MilestoneState, type PracticeArea } from './practice';
 
@@ -9,6 +9,10 @@ export type Screen =
   | 'intake'
   | 'matters'
   | 'matter'
+  | 'pnc'
+  | 'contacts'
+  | 'contact'
+  | 'conflicts'
   | 'time'
   | 'calendar'
   | 'scheduling'
@@ -36,7 +40,8 @@ interface State {
   cadences: Cadences;
   matters: Matter[];
   pncs: Pnc[];
-  clients: seed.Client[];
+  contacts: Contact[];
+  roles: Role[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
   reminders: Reminder[];
@@ -50,8 +55,8 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v2';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing'>> {
+const CONFIG_KEY = 'docket.config.v3';
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -68,7 +73,8 @@ function initialState(): State {
     billing: cfg.billing ?? DEFAULT_BILLING,
     matters: seed.matters,
     pncs: seed.pncs,
-    clients: seed.clients,
+    contacts: seed.contacts,
+    roles: cfg.roles ?? seed.DEFAULT_ROLES,
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
     reminders: seed.reminders,
@@ -81,27 +87,34 @@ function initialState(): State {
   };
 }
 
+export type Target = { kind: 'matter' | 'pnc'; id: string };
+
 function useStoreValue() {
   const [s, setS] = useState<State>(initialState);
   const [screen, setScreen] = useState<Screen>('today');
   const [matterId, setMatterId] = useState<string>('m1');
+  const [pncId, setPncId] = useState<string>('p1');
+  const [contactId, setContactId] = useState<string>('c1');
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing]);
+  }, [s.areas, s.cadences, s.billing, s.roles]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 3400);
   }, []);
 
-  const go = useCallback((sc: Screen, mId?: string) => {
-    if (mId) setMatterId(mId);
+  /** Navigate. The id is a matter, PNC or contact id depending on the screen. */
+  const go = useCallback((sc: Screen, id?: string) => {
+    if (id && (sc === 'matter' || sc === 'portal')) setMatterId(id);
+    if (id && sc === 'pnc') setPncId(id);
+    if (id && sc === 'contact') setContactId(id);
     setScreen(sc);
     window.scrollTo({ top: 0 });
   }, []);
@@ -125,6 +138,59 @@ function useStoreValue() {
       },
       logContact(id: string) {
         patchMatter(id, (m) => ({ ...m, lastContact: todayISO() }));
+      },
+      /** Former clients: the matter leaves the active board but stays searchable forever. */
+      closeMatter(id: string) {
+        setS((x) => ({
+          ...x,
+          matters: x.matters.map((m) => {
+            if (m.id !== id) return m;
+            const area = x.areas.find((a) => a.id === m.areaId);
+            const closedMs = area?.milestones[area.milestones.length - 1];
+            const milestones = closedMs && !m.milestones[closedMs.id]?.done ? { ...m.milestones, [closedMs.id]: { done: todayISO() } } : m.milestones;
+            return { ...m, status: 'closed', closedOn: todayISO(), milestones, stageId: area?.stages[area.stages.length - 1].id ?? m.stageId };
+          }),
+        }));
+      },
+      reopenMatter(id: string) {
+        patchMatter(id, (m) => ({ ...m, status: 'open', closedOn: undefined }));
+      },
+
+      // ----- Contacts, parties, notes -----
+      addContact(c: Omit<Contact, 'id' | 'notes'>): string {
+        const id = newId('ct');
+        setS((x) => ({ ...x, contacts: [...x.contacts, { ...c, id, notes: [] }] }));
+        return id;
+      },
+      updateContact(id: string, patch: Partial<Contact>) {
+        setS((x) => ({ ...x, contacts: x.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+      },
+      setParties(target: Target, f: (p: Party[]) => Party[]) {
+        setS((x) =>
+          target.kind === 'matter'
+            ? { ...x, matters: x.matters.map((m) => (m.id === target.id ? { ...m, parties: f(m.parties) } : m)) }
+            : { ...x, pncs: x.pncs.map((p) => (p.id === target.id ? { ...p, parties: f(p.parties) } : p)) },
+        );
+      },
+      addNote(target: Target | { kind: 'contact'; id: string }, text: string, author = 'me') {
+        const n: Note = { id: newId('n'), at: new Date().toISOString(), author, text };
+        const add = <T extends { id: string; notes: Note[] }>(arr: T[]) => arr.map((e) => (e.id === target.id ? { ...e, notes: [n, ...e.notes] } : e));
+        setS((x) =>
+          target.kind === 'matter' ? { ...x, matters: add(x.matters) } : target.kind === 'pnc' ? { ...x, pncs: add(x.pncs) } : { ...x, contacts: add(x.contacts) },
+        );
+      },
+      togglePin(target: Target | { kind: 'contact'; id: string }, noteId: string) {
+        const flip = <T extends { id: string; notes: Note[] }>(arr: T[]) =>
+          arr.map((e) => (e.id === target.id ? { ...e, notes: e.notes.map((n) => (n.id === noteId ? { ...n, pinned: !n.pinned } : n)) } : e));
+        setS((x) =>
+          target.kind === 'matter' ? { ...x, matters: flip(x.matters) } : target.kind === 'pnc' ? { ...x, pncs: flip(x.pncs) } : { ...x, contacts: flip(x.contacts) },
+        );
+      },
+      recordConflict(pncId: string, check: ConflictCheck) {
+        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === pncId ? { ...p, conflict: check, stage: check.result === 'conflict' ? 'declined' : p.stage } : p)) }));
+      },
+      setRoles(roles: Role[]) {
+        setS((x) => ({ ...x, roles }));
       },
 
       // ----- Practice areas (settings) -----
@@ -170,8 +236,21 @@ function useStoreValue() {
       markTouch(id: string, key: string) {
         setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, touches: { ...p.touches, [key]: todayISO() } } : p)) }));
       },
-      addPnc(p: Omit<Pnc, 'id' | 'touches'>) {
-        setS((x) => ({ ...x, pncs: [{ ...p, id: newId('p'), touches: {} }, ...x.pncs] }));
+      /** New PNC matter. Pass an existing contact id, or new contact details to create one. */
+      addPnc(p: Omit<Pnc, 'id' | 'touches' | 'parties' | 'notes'>, who: { contactId: string } | Omit<Contact, 'id' | 'notes'>, others: Party[] = []): string {
+        const id = newId('p');
+        setS((x) => {
+          let contacts = x.contacts;
+          let contactId: string;
+          if ('contactId' in who) contactId = who.contactId;
+          else {
+            contactId = newId('ct');
+            contacts = [...contacts, { ...who, id: contactId, notes: [] }];
+          }
+          const pnc: Pnc = { ...p, id, touches: {}, notes: [], parties: [{ contactId, role: 'client', primary: true }, ...others] };
+          return { ...x, contacts, pncs: [pnc, ...x.pncs] };
+        });
+        return id;
       },
       /** Hired: the prospect becomes a client and a matter, with nothing retyped. */
       hirePnc(id: string, areaId: string, planType: string | undefined, matterId: string) {
@@ -179,13 +258,16 @@ function useStoreValue() {
           const p = x.pncs.find((q) => q.id === id);
           const area = x.areas.find((a) => a.id === areaId);
           if (!p || !area) return x;
-          const clientId = newId('c');
           const engaged = area.milestones[0];
+          const primary = x.contacts.find((c) => c.id === (p.parties.find((q) => q.primary) ?? p.parties[0])?.contactId);
           const matter: Matter = {
             id: matterId,
-            number: `2026-${String(x.matters.length + 101).padStart(4, '0')}`,
-            name: `${p.name.split(',')[0]} ${area.name}`,
-            clientId,
+            number: `2026-${String(x.matters.filter((m) => m.status === 'open').length + 101).padStart(4, '0')}`,
+            name: `${primary?.name.split(',')[0] ?? 'New'} ${area.name}`,
+            parties: p.parties,
+            notes: [],
+            status: 'open',
+            pncId: p.id,
             areaId,
             stageId: area.stages[0].id,
             planType,
@@ -200,7 +282,6 @@ function useStoreValue() {
           };
           return {
             ...x,
-            clients: [...x.clients, { id: clientId, name: p.name, email: '', phone: p.phone }],
             matters: [...x.matters, matter],
             pncs: x.pncs.map((q) => (q.id === id ? { ...q, stage: 'hired', matterId } : q)),
           };
@@ -288,8 +369,10 @@ function useStoreValue() {
           const type = x.eventTypes.find((t) => t.id === typeId)!;
           const isProspect = type.who === 'prospects';
           const pncId = newId('p');
+          const contactId = newId('ct');
+          const contacts = isProspect ? [...x.contacts, { id: contactId, name, kind: 'person' as const, phone, email: '', notes: [] }] : x.contacts;
           const pncs: Pnc[] = isProspect
-            ? [{ id: pncId, name, phone, source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: start, touches: {}, owner: 'me' }, ...x.pncs]
+            ? [{ id: pncId, title: answers[0] || 'Consultation', parties: [{ contactId, role: 'client', primary: true }], source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: start, touches: {}, owner: 'me', notes: answers[1] ? [{ id: newId('n'), at: new Date().toISOString(), author: 'system', text: `Others named at booking: ${answers[1]}` }] : [] }, ...x.pncs]
             : x.pncs;
           const ev: CalEvent = { id: newId('e'), title: `${isProspect ? 'Consult' : type.name}: ${name.split(',')[0]}`, start, minutes: type.minutes, pncId: isProspect ? pncId : undefined, kind: 'consult' };
           const msg: Message = {
@@ -300,7 +383,7 @@ function useStoreValue() {
             at: new Date().toISOString(),
             clientVisible: false,
           };
-          return { ...x, pncs, events: [...x.events, ev], messages: [...x.messages, msg] };
+          return { ...x, contacts, pncs, events: [...x.events, ev], messages: [...x.messages, msg] };
         });
       },
       toggleEventType(id: string) {
@@ -314,7 +397,7 @@ function useStoreValue() {
       simulateIncomingCall() {
         setS((x) => {
           const m = x.matters.find((q) => q.id === 'm8') ?? x.matters[0];
-          const c = x.clients.find((q) => q.id === m.clientId)!;
+          const c = x.contacts.find((q) => q.id === (m.parties.find((p) => p.primary) ?? m.parties[0]).contactId)!;
           return { ...x, activeCall: { contact: c.name, number: c.phone, matterId: m.id, startedAt: Date.now() } };
         });
       },
@@ -345,15 +428,18 @@ function useStoreValue() {
   const lookup = useMemo(
     () => ({
       matter: (id: string) => s.matters.find((m) => m.id === id),
-      client: (id: string) => s.clients.find((c) => c.id === id),
-      clientOf: (m: Matter) => s.clients.find((c) => c.id === m.clientId),
+      contact: (id: string) => s.contacts.find((c) => c.id === id),
+      /** Primary contact on a matter or PNC matter. */
+      clientOf: (m: { parties: Party[] }) => s.contacts.find((c) => c.id === (m.parties.find((p) => p.primary) ?? m.parties[0])?.contactId),
+      pnc: (id: string) => s.pncs.find((p) => p.id === id),
+      role: (id: string) => s.roles.find((r) => r.id === id) ?? { id, name: id, side: 'neutral' as const },
       area: (id: string) => s.areas.find((a) => a.id === id),
       areaOf: (m: Matter) => s.areas.find((a) => a.id === m.areaId) ?? s.areas[0],
     }),
-    [s.matters, s.clients, s.areas],
+    [s.matters, s.contacts, s.areas, s.pncs, s.roles],
   );
 
-  return { s, actions, lookup, screen, matterId, go, toast, notify };
+  return { s, actions, lookup, screen, matterId, pncId, contactId, go, toast, notify };
 }
 
 type Store = ReturnType<typeof useStoreValue>;

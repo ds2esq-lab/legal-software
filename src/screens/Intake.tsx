@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import { PNC_STAGES, TEAM, type Pnc, type PncStage } from '../data';
+import { searchConflicts, summarize } from '../conflicts';
 import { nextTouch, touchesFor } from '../intake';
 import { addDays, newId, todayISO } from '../practice';
 import { DuePill, fmtDate, fmtTime, PageHead, Person, relDay } from '../ui';
@@ -8,7 +9,7 @@ import { DuePill, fmtDate, fmtTime, PageHead, Person, relDay } from '../ui';
 const OPEN = PNC_STAGES.filter((x) => x.open);
 const CLOSED = PNC_STAGES.filter((x) => !x.open);
 
-function HireForm({ p, onDone }: { p: Pnc; onDone: () => void }) {
+export function HireForm({ p, onDone }: { p: Pnc; onDone: () => void }) {
   const { s, actions, go, notify } = useStore();
   const [areaId, setAreaId] = useState(p.areaId ?? s.areas[0].id);
   const area = s.areas.find((a) => a.id === areaId)!;
@@ -41,8 +42,15 @@ function HireForm({ p, onDone }: { p: Pnc; onDone: () => void }) {
   );
 }
 
+function ConflictPill({ p }: { p: Pnc }) {
+  if (!p.conflict) return <span className="pill warn">Conflicts: not run</span>;
+  const r = p.conflict.result;
+  return <span className={`pill ${r === 'conflict' ? 'danger' : r === 'waived' ? 'warn' : 'ok'}`}>Conflicts: {r}</span>;
+}
+
 function PncCard({ p }: { p: Pnc }) {
   const { s, actions, lookup, notify, go } = useStore();
+  const who = lookup.clientOf(p);
   const [hiring, setHiring] = useState(false);
   const next = nextTouch(p, s.cadences);
   const all = touchesFor(p, s.cadences);
@@ -52,10 +60,11 @@ function PncCard({ p }: { p: Pnc }) {
   return (
     <article className="card" style={{ cursor: 'default' }}>
       <div className="spread" style={{ alignItems: 'flex-start' }}>
-        <strong className="t1">{p.name}</strong>
+        <button className="link t1" style={{ color: 'var(--ink)' }} onClick={() => go('pnc', p.id)}>{who?.name ?? 'Unnamed'}</button>
         <Person id={p.owner} />
       </div>
-      <div className="small muted">{p.areaId ? lookup.area(p.areaId)?.name : 'Area unknown'} · {p.source}</div>
+      <div className="small muted">{p.title}</div>
+      <div className="row" style={{ gap: 4 }}><ConflictPill p={p} />{p.parties.length > 1 && <span className="small muted">+{p.parties.length - 1} people</span>}</div>
       {p.consultAt && (p.stage === 'scheduled' || p.stage === 'notes') && (
         <div className="small">Consult {relDay(p.consultAt)} {fmtTime(p.consultAt)}</div>
       )}
@@ -115,9 +124,13 @@ function PncCard({ p }: { p: Pnc }) {
 }
 
 export default function Intake() {
-  const { s, actions, lookup, notify } = useStore();
+  const { s, actions, lookup, notify, go } = useStore();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [title, setTitle] = useState('');
+  const [others, setOthers] = useState('');
+  const [adverse, setAdverse] = useState('');
   const [source, setSource] = useState('Phone call');
   const [areaId, setAreaId] = useState('ep');
   const [owner, setOwner] = useState('dana');
@@ -131,7 +144,7 @@ export default function Intake() {
 
   return (
     <>
-      <PageHead title="Intake" sub="One record per prospect from first call to hired. The system schedules every follow-up touch; your team works the “Due today” list. Change the cadences in Settings." />
+      <PageHead title="PNC matters" sub="One PNC matter per prospect, from first call to hired. The system schedules every follow-up touch; your team works the “Due today” list. Change the cadences in Settings." />
 
       <div className="grid cols-main">
         <section className="panel">
@@ -140,14 +153,14 @@ export default function Intake() {
             {queue.length === 0 && notes.length === 0 && <li className="muted">Nothing due. Nice.</li>}
             {notes.map((p) => (
               <li key={p.id} className="spread">
-                <span><strong>{p.name}</strong><div className="small muted">Consult held {p.consultAt ? relDay(p.consultAt) : ''}. Attorney notes needed before follow-up starts.</div></span>
+                <span><button className="link" onClick={() => go('pnc', p.id)}><strong>{lookup.clientOf(p)?.name}</strong></button><div className="small muted">Consult held {p.consultAt ? relDay(p.consultAt) : ''}. Attorney notes needed before follow-up starts.</div></span>
                 <button className="btn sm" onClick={() => { actions.updatePnc(p.id, { stage: 'followup' }); notify('Notes in. Follow-up cadence started.'); }}>Notes done</button>
               </li>
             ))}
             {queue.map(({ p, t }) => (
               <li key={p.id} className="spread">
                 <span>
-                  <strong>{p.name}</strong> <span className="small muted num">{p.phone}</span>
+                  <button className="link" onClick={() => go('pnc', p.id)}><strong>{lookup.clientOf(p)?.name}</strong></button> <span className="small muted num">{lookup.clientOf(p)?.phone}</span>
                   <div className="small muted">{t!.label} · {p.areaId ? lookup.area(p.areaId)?.name : ''}</div>
                 </span>
                 <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
@@ -160,21 +173,29 @@ export default function Intake() {
         </section>
 
         <section className="panel">
-          <div className="panel-head"><h2>New prospect</h2></div>
+          <div className="panel-head"><h2>New PNC matter</h2></div>
           <form
             className="panel-body stack"
             onSubmit={(e) => {
               e.preventDefault();
               if (!name.trim()) return;
-              actions.addPnc({ name: name.trim(), phone, source, areaId, stage: 'inquiry', firstContact: todayISO(), owner });
-              setName('');
-              setPhone('');
-              notify(`Added. First scheduling follow-up due in ${s.cadences.scheduling[0]} days.`);
+              const extra = [
+                ...others.split('\n').map((x) => x.trim()).filter(Boolean).map((n) => ({ contactId: actions.addContact({ name: n, kind: 'person', phone: '', email: '' }), role: 'spouse' })),
+                ...adverse.split('\n').map((x) => x.trim()).filter(Boolean).map((n) => ({ contactId: actions.addContact({ name: n, kind: 'person', phone: '', email: '' }), role: 'opposing' })),
+              ];
+              const id = actions.addPnc({ title: title.trim() || 'New inquiry', source, areaId, stage: 'inquiry', firstContact: todayISO(), owner }, { name: name.trim(), kind: 'person', phone, email }, extra);
+              setName(''); setPhone(''); setEmail(''); setTitle(''); setOthers(''); setAdverse('');
+              notify('PNC matter created. Review the conflict check before booking the consult.');
+              go('pnc', id);
             }}
           >
             <div className="field"><label htmlFor="n-name">Name (Last, First)</label><input className="input" id="n-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rivera, Sam" /></div>
+            <div className="field"><label htmlFor="n-title">What it’s about</label><input className="input" id="n-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Probate of father’s estate" /></div>
             <div className="grid cols-2" style={{ gap: 8 }}>
               <div className="field"><label htmlFor="n-phone">Phone</label><input className="input num" id="n-phone" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+              <div className="field"><label htmlFor="n-email">Email</label><input className="input" id="n-email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+              <div className="field"><label htmlFor="n-others">Others on their side <span className="muted">(one per line)</span></label><textarea className="input" id="n-others" rows={2} value={others} onChange={(e) => setOthers(e.target.value)} placeholder="Spouse, co-trustee…" /></div>
+              <div className="field"><label htmlFor="n-adverse">Other side <span className="muted">(one per line)</span></label><textarea className="input" id="n-adverse" rows={2} value={adverse} onChange={(e) => setAdverse(e.target.value)} placeholder="Opposing party, their lawyer…" /></div>
               <div className="field"><label htmlFor="n-src">Source</label>
                 <select className="input" id="n-src" value={source} onChange={(e) => setSource(e.target.value)}>
                   {['Phone call', 'Website form', 'Google', 'Referral: past client', 'Referral: professional', 'Seminar'].map((x) => <option key={x}>{x}</option>)}
@@ -191,7 +212,8 @@ export default function Intake() {
                 </select>
               </div>
             </div>
-            <button className="btn primary" type="submit">Add prospect</button>
+            {name.trim().length > 2 && <LiveConflict name={name} phone={phone} email={email} others={others} adverse={adverse} />}
+            <button className="btn primary" type="submit">Create PNC matter</button>
           </form>
         </section>
       </div>
@@ -216,7 +238,7 @@ export default function Intake() {
             <tbody>
               {s.pncs.filter((p) => CLOSED.some((x) => x.id === p.stage)).map((p) => (
                 <tr key={p.id}>
-                  <td>{p.name}</td>
+                  <td><button className="link" onClick={() => go('pnc', p.id)}>{lookup.clientOf(p)?.name}</button><div className="small muted">{p.title}</div></td>
                   <td>
                     <span className={`pill ${p.stage === 'hired' ? 'ok' : p.stage === 'lost' ? 'danger' : 'warn'}`}>{PNC_STAGES.find((x) => x.id === p.stage)!.label}</span>
                     {p.stage === 'future' && p.futureDate && <span className="small muted"> · call back {fmtDate(p.futureDate)}</span>}
@@ -232,5 +254,26 @@ export default function Intake() {
         </div>
       </section>
     </>
+  );
+}
+
+/** Conflict preview while the intake form is being filled in. */
+function LiveConflict({ name, phone, email, others, adverse }: { name: string; phone: string; email: string; others: string; adverse: string }) {
+  const { s } = useStore();
+  const lines = (v: string) => v.split('\n').map((x) => x.trim()).filter(Boolean);
+  const terms = [
+    { text: name, side: 'client' as const },
+    ...(phone.replace(/\D/g, '').length >= 7 ? [{ text: phone, side: 'client' as const }] : []),
+    ...(email.includes('@') ? [{ text: email, side: 'client' as const }] : []),
+    ...lines(others).map((t) => ({ text: t, side: 'client' as const })),
+    ...lines(adverse).map((t) => ({ text: t, side: 'adverse' as const })),
+  ];
+  const hits = searchConflicts(terms, s.contacts, s.matters, s.pncs, s.roles);
+  const sum = summarize(hits);
+  return (
+    <div className={`banner sev-${sum.level} small`}>
+      <strong>Conflict preview:</strong> {sum.text}
+      {hits.slice(0, 3).map((h) => <div key={h.contact.id}>· {h.contact.name}: {h.links.map((l) => `${l.role.name} on ${l.title}${l.kind === 'former' ? ' (former)' : l.kind === 'pnc' ? ' (PNC)' : ''}`).join('; ') || 'no matters'}</div>)}
+    </div>
   );
 }

@@ -3,6 +3,9 @@ import { useStore, type Screen } from './store';
 import { formatClock } from './billing';
 import Today from './screens/Today';
 import Intake from './screens/Intake';
+import PncDetail from './screens/PncDetail';
+import Contacts, { ContactDetail } from './screens/Contacts';
+import Conflicts from './screens/Conflicts';
 import Matters from './screens/Matters';
 import MatterDetail from './screens/MatterDetail';
 import TimeBilling from './screens/TimeBilling';
@@ -16,8 +19,10 @@ import Settings from './screens/Settings';
 
 const NAV: { group?: string; id: Screen; label: string }[] = [
   { id: 'today', label: 'Today' },
-  { id: 'intake', label: 'Intake' },
-  { id: 'matters', label: 'Matters' },
+  { id: 'intake', label: 'PNC matters' },
+  { id: 'matters', label: 'Client matters' },
+  { id: 'contacts', label: 'Contacts' },
+  { id: 'conflicts', label: 'Conflict check' },
   { id: 'reminders', label: 'Reminders' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'messages', label: 'Messages' },
@@ -105,6 +110,10 @@ export default function App() {
   const view = {
     today: <Today />,
     intake: <Intake />,
+    pnc: <PncDetail />,
+    contacts: <Contacts />,
+    contact: <ContactDetail />,
+    conflicts: <Conflicts />,
     matters: <Matters />,
     matter: <MatterDetail />,
     time: <TimeBilling />,
@@ -128,7 +137,7 @@ export default function App() {
           {NAV.map((n) => (
             <div key={n.id} style={{ display: 'contents' }}>
               {n.group && <div className="nav-group">{n.group}</div>}
-              <button aria-current={screen === n.id || (screen === 'matter' && n.id === 'matters') ? 'page' : undefined} onClick={() => go(n.id)}>
+              <button aria-current={screen === n.id || (screen === 'matter' && n.id === 'matters') || (screen === 'pnc' && n.id === 'intake') || (screen === 'contact' && n.id === 'contacts') ? 'page' : undefined} onClick={() => go(n.id)}>
                 <span>{n.label}</span>
                 {n.id === 'reminders' && overdue > 0 && <span className="count">{overdue}</span>}
               </button>

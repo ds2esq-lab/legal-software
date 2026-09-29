@@ -26,7 +26,7 @@ export default function Portal() {
     <>
       <PageHead title="Client portal" sub="Exactly what your client sees when they sign in. Team-only notes and internal documents never show up here.">
         <select className="input" style={{ width: 'auto', maxWidth: 320 }} id="portal-matter" aria-label="Preview as" value={m.id} onChange={(e) => setSel(e.target.value)}>
-          {s.matters.map((x) => <option key={x.id} value={x.id}>{lookup.clientOf(x)?.name} — {x.name}</option>)}
+          {s.matters.filter((x) => x.status === 'open').map((x) => <option key={x.id} value={x.id}>{lookup.clientOf(x)?.name} — {x.name}</option>)}
         </select>
       </PageHead>
 

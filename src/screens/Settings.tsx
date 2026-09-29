@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import { INCREMENT_OPTIONS, type RoundingMode } from '../billing';
-import type { Cadences } from '../data';
+import type { Cadences, Role, RoleSide } from '../data';
 import { newId, type DueRule, type Milestone, type PracticeArea, type Stage } from '../practice';
 import { PageHead } from '../ui';
 
-type Section = 'areas' | 'intake' | 'billing' | 'integrations';
+type Section = 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -210,6 +210,33 @@ function CadenceEditor() {
   );
 }
 
+function RolesEditor() {
+  const { s, actions } = useStore();
+  const used = (id: string) => s.matters.some((m) => m.parties.some((p) => p.role === id)) || s.pncs.some((p) => p.parties.some((x) => x.role === id));
+  const set = (roles: Role[]) => actions.setRoles(roles);
+  return (
+    <section className="panel" style={{ maxWidth: 760 }}>
+      <div className="panel-head"><h2>Contact roles</h2><span className="small muted">The side decides how conflict checks treat a match.</span></div>
+      <ul className="list">
+        {s.roles.map((r, i) => (
+          <li key={r.id} className="spread">
+            <input className="input small" style={{ flex: 1 }} id={`role-name-${r.id}`} aria-label="Role name" value={r.name} onChange={(e) => set(s.roles.map((x) => (x.id === r.id ? { ...x, name: e.target.value } : x)))} />
+            <select className="input small tight" id={`role-side-${r.id}`} aria-label="Side" value={r.side} onChange={(e) => set(s.roles.map((x) => (x.id === r.id ? { ...x, side: e.target.value as RoleSide } : x)))}>
+              <option value="client">Our side</option>
+              <option value="adverse">Other side (adverse)</option>
+              <option value="neutral">Neutral</option>
+            </select>
+            <button className="btn sm ghost icon" aria-label="Move up" disabled={i === 0} onClick={() => set(move(s.roles, i, -1))}>↑</button>
+            <button className="btn sm ghost icon" aria-label="Move down" disabled={i === s.roles.length - 1} onClick={() => set(move(s.roles, i, 1))}>↓</button>
+            <button className="btn sm ghost icon danger" aria-label={`Delete ${r.name}`} disabled={used(r.id)} title={used(r.id) ? 'In use on a matter' : 'Delete role'} onClick={() => set(s.roles.filter((x) => x.id !== r.id))}>×</button>
+          </li>
+        ))}
+      </ul>
+      <div className="panel-body"><AddRow id="add-role" placeholder="New role, e.g. Guardian ad Litem" onAdd={(name) => set([...s.roles, { id: newId('role'), name, side: 'neutral' }])} /></div>
+    </section>
+  );
+}
+
 export default function Settings() {
   const { s, actions, notify } = useStore();
   const [section, setSection] = useState<Section>('areas');
@@ -220,7 +247,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['areas', 'Practice areas'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).map(([k, l]) => (
+        {([['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -247,6 +274,7 @@ export default function Settings() {
         </div>
       )}
 
+      {section === 'roles' && <RolesEditor />}
       {section === 'intake' && <CadenceEditor />}
 
       {section === 'billing' && (

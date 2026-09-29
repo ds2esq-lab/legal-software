@@ -22,7 +22,7 @@ export default function Today() {
 
   // One queue from every source of dates: milestones, suspense dates, contact timers, reminders.
   const items: Item[] = [];
-  for (const m of s.matters) {
+  for (const m of s.matters.filter((x) => x.status === 'open')) {
     if (who !== 'all' && m.ball !== who && m.owner !== who) continue;
     const area = lookup.areaOf(m);
     for (const d of dueMilestones(m, area)) if (d.date <= soonWindow) items.push({ key: `${m.id}-ms-${d.milestoneId}`, date: d.date, kind: 'Milestone', what: `${d.name} due`, m });
@@ -37,8 +37,9 @@ export default function Today() {
   items.sort((a, b) => a.date.localeCompare(b.date));
   const late = items.filter((i) => i.date < today).length;
 
-  const allFollowUps = s.matters.filter((m) => contactState(m.lastContact, lookup.areaOf(m)) === 'followup').length;
-  const lateMilestones = s.matters.reduce((n, m) => n + dueMilestones(m, lookup.areaOf(m)).filter((d) => d.late).length, 0);
+  const openMatters = s.matters.filter((m) => m.status === 'open');
+  const allFollowUps = openMatters.filter((m) => contactState(m.lastContact, lookup.areaOf(m)) === 'followup').length;
+  const lateMilestones = openMatters.reduce((n, m) => n + dueMilestones(m, lookup.areaOf(m)).filter((d) => d.late).length, 0);
   const touchesDue = s.pncs.filter((p) => { const t = nextTouch(p, s.cadences); return t && t.due <= today; }).length;
   const todayEvents = s.events.filter((e) => e.start.slice(0, 10) === today || relDay(e.start) === 'Today').sort((a, b) => a.start.localeCompare(b.start));
 
@@ -69,7 +70,7 @@ export default function Today() {
         </button>
         <button className="stat" onClick={() => go('matters')}>
           <span className="label">Open matters</span>
-          <span className="v">{s.matters.length}</span>
+          <span className="v">{openMatters.length}</span>
         </button>
       </div>
 
@@ -124,7 +125,7 @@ export default function Today() {
           <section className="panel">
             <div className="panel-head"><h2>Longest without contact</h2></div>
             <ul className="list">
-              {[...s.matters]
+              {[...openMatters]
                 .filter((m) => m.lastContact)
                 .sort((a, b) => a.lastContact!.localeCompare(b.lastContact!))
                 .slice(0, 5)

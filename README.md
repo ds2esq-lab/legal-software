@@ -9,9 +9,11 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Area | What it shows |
 |---|---|
 | Today | One queue of everything dated: late milestones, suspense dates, contact follow-ups, deadlines |
-| Intake | One record per prospect from first call to hired; the system schedules every follow-up touch |
-| Matters | A board per practice area with that area's own stages; table view with inline Whose Ball and suspense dates |
-| Matter page | Whose Ball, last contact, suspense date, milestone timeline with editable due dates, closeout checklist |
+| PNC matters | One record per prospect from first call to hired, with a recorded conflict check; the system schedules every follow-up touch |
+| Contacts | Every person and organization stored once, attached to any number of PNC and Client matters with a role on each |
+| Conflict check | Searches every contact on every PNC, open and former matter (names, former names, phones, emails) and flags opposite-side matches |
+| Client matters | Open matters and former clients. A board per practice area with that area's own stages; table view with inline Whose Ball and suspense dates |
+| Matter page | People and roles, notes, Whose Ball, last contact, suspense date, milestone timeline with editable due dates, closeout checklist |
 | Time & billing | Hourly, flat-fee and hybrid matters; configurable rounding (6-minute default) |
 | Scheduling | Calendly-style booking links; bookings create leads, events and conflict checks |
 | Reminders | Owner, nudge schedule, limited snoozes, escalation to a backup person |
