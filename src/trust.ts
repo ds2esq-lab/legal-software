@@ -7,6 +7,7 @@
 //   - The software never moves money. Approved outflows are made at the bank; the bank feed then
 //     shows them and they are matched. Anything unmatched surfaces in the reconciliation.
 import { addDays, todayISO } from './practice';
+import { matters as seedMatters } from './data';
 
 export const TRUST_ACCOUNT = { name: 'M&T Bank IOLTA', last4: '4821' };
 export const OPERATING_ACCOUNT = { name: 'M&T Bank Operating', last4: '1177' };
@@ -207,6 +208,19 @@ export const trustTxns: TrustTxn[] = [
   tx('m14', 1, 'draw', 1540, 'Payment of INV-1044', { invoiceId: 'inv4', status: 'pending', requestedBy: 'marcus', approvedBy: undefined }),
   tx('m10', 45, 'deposit', 7500, 'Retainer', { payee: 'Halvorsen, Hayden', method: 'wire', ref: 'Wire 2290' }),
 ];
+
+// History: former fixed-price matters were paid into trust at engagement and fully drawn by close.
+for (const m of seedMatters.filter((q) => q.status === 'closed' && q.billing.kind === 'flat')) {
+  const fee = (m.billing as { amount: number }).amount;
+  const opened = m.opened;
+  const closed = m.closedOn!;
+  const mid = addDays(opened, Math.round((new Date(closed).getTime() - new Date(opened).getTime()) / 172800000));
+    trustTxns.push(
+    { id: `tt-h${++k}`, date: addDays(opened, 1), matterId: m.id, kind: 'deposit', amount: fee, memo: 'Fixed price paid in full', method: 'lawpay', ref: `LP-${70000 + k}`, status: 'approved', requestedBy: 'me', approvedBy: 'me' },
+    { id: `tt-h${++k}`, date: mid, matterId: m.id, kind: 'draw', amount: round(fee / 2), memo: 'Earned 50%', method: 'transfer', status: 'approved', requestedBy: 'me', approvedBy: 'me' },
+    { id: `tt-h${++k}`, date: closed, matterId: m.id, kind: 'draw', amount: round(fee - round(fee / 2)), memo: 'Earned balance at close', method: 'transfer', status: 'approved', requestedBy: 'me', approvedBy: 'me' },
+  );
+}
 
 // What M&T reports. Most lines match the books; two things don't, on purpose:
 //   - a $15 bank service charge taken from IOLTA (must be moved to operating)

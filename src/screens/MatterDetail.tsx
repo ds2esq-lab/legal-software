@@ -463,10 +463,15 @@ export default function MatterDetail() {
               <input className="input small" id="d-susp-note" aria-label="Suspense note" placeholder="What’s the suspense for?" value={m.suspenseNote ?? ''} onChange={(e) => up({ suspenseNote: e.target.value || undefined })} />
             </div>
             <div className="field">
+              <label htmlFor="d-orig">Originating attorney</label>
+              <select className="input" id="d-orig" value={m.originator} onChange={(e) => up({ originator: e.target.value })} disabled={!access.can('reports')} title={access.can('reports') ? '' : 'Only someone with Firm performance can change credit'}>
+                {TEAM.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
               <label htmlFor="d-number">Matter number</label>
               <input className="input num" id="d-number" value={m.number} onChange={(e) => up({ number: e.target.value })} />
             </div>
-            <div />
             <label className="row small"><input type="checkbox" id="d-stalled" checked={m.stalled} onChange={(e) => up({ stalled: e.target.checked })} /> Stalled</label>
             <label className="row small"><input type="checkbox" id="d-prio" checked={m.priority} onChange={(e) => up({ priority: e.target.checked })} /> Priority</label>
           </div>

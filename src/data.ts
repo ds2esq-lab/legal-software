@@ -88,6 +88,7 @@ export interface Matter {
   stageId: string;
   planType?: string;
   owner: string; // responsible attorney
+  originator: string; // originating attorney: gets credit for fees brought in
   ball: Ball; // "Whose Ball"
   billing: BillingArrangement;
   priority: boolean;
@@ -319,7 +320,7 @@ export const TEAM = [
 
 // ---------- Permissions ----------
 
-export type Perm = 'intake' | 'matters' | 'contacts' | 'time' | 'billingView' | 'invoices' | 'payments' | 'settings' | 'users';
+export type Perm = 'intake' | 'matters' | 'contacts' | 'time' | 'billingView' | 'invoices' | 'payments' | 'reports' | 'settings' | 'users';
 export const PERMS: { id: Perm; label: string; help: string }[] = [
   { id: 'intake', label: 'PNC matters & intake', help: 'See and work prospects, run conflict checks on them' },
   { id: 'matters', label: 'Client matters', help: 'Only in the practice areas the person is given below' },
@@ -328,6 +329,7 @@ export const PERMS: { id: Perm; label: string; help: string }[] = [
   { id: 'billingView', label: 'See billing', help: 'Rates, unbilled work, invoices' },
   { id: 'invoices', label: 'Create & send invoices', help: 'Drafts, sending, deleting drafts' },
   { id: 'payments', label: 'Record payments & trust', help: 'Payments, trust transfers, reconciliation' },
+  { id: 'reports', label: 'Firm performance', help: 'Every attorney’s numbers (everyone sees their own)' },
   { id: 'settings', label: 'Firm settings', help: 'Practice areas, stages, deadlines, cadences' },
   { id: 'users', label: 'Users & permissions', help: 'This screen' },
 ];
@@ -348,10 +350,12 @@ export interface UserAccess {
   userId: string;
   roleId: string;
   areas: 'all' | string[]; // practice areas they can see Client matters in
+  measure?: 'fixed' | 'hourly' | 'both'; // attorneys: which numbers they're measured on
+  goal?: number; // quarterly goal for the headline number
 }
 export const DEFAULT_USERS: UserAccess[] = [
-  { userId: 'me', roleId: 'managing', areas: 'all' },
-  { userId: 'marcus', roleId: 'attorney', areas: ['ep', 'gc', 'biz', 'fam'] },
+  { userId: 'me', roleId: 'managing', areas: 'all', measure: 'both', goal: 60000 },
+  { userId: 'marcus', roleId: 'attorney', areas: ['ep', 'gc', 'biz', 'fam'], measure: 'fixed', goal: 25000 },
   { userId: 'dana', roleId: 'paralegal', areas: 'all' },
   { userId: 'priya', roleId: 'paralegal', areas: ['fpet', 'ipet'] },
   { userId: 'lena', roleId: 'bookkeeper', areas: 'all' },
@@ -481,6 +485,7 @@ type Seed = {
   suspense?: [number, string];
   more?: Party[];
   notes?: Note[];
+  originator?: string;
 };
 
 const seeds: Seed[] = [
@@ -535,6 +540,7 @@ const openMatters: Matter[] = seeds.map((s, i) => {
     stageId: slug(s.stage),
     planType: s.plan,
     owner: s.owner ?? 'me',
+    originator: s.originator ?? s.owner ?? 'me',
     ball: s.ball,
     billing: s.billing ?? { kind: 'hourly', rate: 350 },
     priority: !!s.priority,
@@ -551,6 +557,12 @@ const openMatters: Matter[] = seeds.map((s, i) => {
 });
 
 // ---------- Former client matters ----------
+
+export const PLAN_PRICE: Record<string, number> = {
+  'Solo Essential (Will)': 1250, 'Couples Essential (Will)': 1850, 'Solo Signature (Trust)': 2950, 'Couples Signature (Trust)': 3950,
+  'Solo Select (Deluxe Trust)': 4450, 'Couples Select (Deluxe Trust)': 5450, 'Will Only': 650, 'DPOA/AMD/HIPAA': 450,
+};
+const AREA_PRICE: Record<string, number> = { deed: 650, biz: 1500, fam: 2500, ipet: 3500 };
 
 const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, plan], i) => {
   const area = DEFAULT_AREAS.find((a) => a.id === areaId)!;
@@ -569,8 +581,9 @@ const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, pla
     stageId: lastStage.id,
     planType: plan,
     owner: i % 5 === 0 ? 'marcus' : 'me',
+    originator: i % 3 === 1 ? 'marcus' : 'me',
     ball: 'me',
-    billing: { kind: 'flat', amount: 0 },
+    billing: areaId === 'fpet' || areaId === 'gc' ? { kind: 'hourly', rate: 350 } : { kind: 'flat', amount: PLAN_PRICE[plan ?? ''] ?? AREA_PRICE[areaId] ?? 1500 },
     priority: false,
     lastContact: day(-closedAgo),
     milestones: { engaged: { done: day(-openedAgo) }, closed: { done: day(-closedAgo) } },
@@ -648,7 +661,13 @@ export const timeEntries: TimeEntry[] = [
   { id: 't8', matterId: 'm17', date: day(-2), actualMinutes: 22, description: 'Title search review', user: 'dana', billable: false, invoiced: false, source: 'manual' },
 ];
 
+const oldInv = (id: string, number: string, matterId: string, ago: number, total: number, paidAgo: number): Invoice =>
+  ({ id, number, matterId, date: day(-ago), lines: [{ description: 'Legal services', amount: total }], total, status: 'paid', sentVia: 'portal', sentAt: day(-ago), paidAt: day(-paidAgo), timeEntryIds: [], flatFeeIds: [] });
+
 export const invoices: Invoice[] = [
+  oldInv('inv-old1', 'INV-1031', 'm8', 62, 2100, 60),
+  oldInv('inv-old2', 'INV-1039', 'm8', 22, 1850, 20),
+  oldInv('inv-old3', 'INV-1035', 'm14', 42, 1600, 40),
   { id: 'inv4', number: 'INV-1044', matterId: 'm14', date: day(-2), lines: [{ date: day(-3), description: 'Research: least restrictive alternatives', hours: 0.9, rate: 350, amount: 315 }, { date: day(-1), description: 'Draft petition and proposed order; prepare hearing notice', hours: 3.5, rate: 350, amount: 1225 }], total: 1540, status: 'sent', sentVia: 'portal', sentAt: day(-2), timeEntryIds: ['t3', 't4'], flatFeeIds: [] },
   { id: 'inv2', number: 'INV-1038', matterId: 'm12', date: day(-45), lines: [{ description: 'Informal probate administration', amount: 3500 }], total: 3500, status: 'paid', sentVia: 'email', sentAt: day(-45), paidAt: day(-40), timeEntryIds: [], flatFeeIds: ['f4'] },
   { id: 'inv3', number: 'INV-1040', matterId: 'm20', date: day(-15), lines: [{ description: 'LLC formation package', amount: 950 }], total: 950, status: 'paid', sentVia: 'portal', sentAt: day(-15), paidAt: day(-14), timeEntryIds: [], flatFeeIds: ['f3'] },
@@ -720,3 +739,16 @@ export const documents: Record<string, { name: string; kind: string; shared: boo
   m8: [{ name: 'Letters of Administration.pdf', kind: 'PDF', shared: true }, { name: 'Inventory worksheet.xlsx', kind: 'XLSX', shared: false }],
   m20: [{ name: 'Engagement letter.pdf', kind: 'PDF', shared: true, needsSignature: true }, { name: 'Operating Agreement – DRAFT.docx', kind: 'DOCX', shared: false }],
 };
+
+// Hourly history on former probate and guardianship matters: monthly invoices, paid ~3 weeks later.
+for (const m of formerMatters.filter((q) => q.billing.kind === 'hourly')) {
+  const span = daysBetweenISO(m.opened, m.closedOn!);
+  for (let d = 30, n = 0; d < span; d += 30, n++) {
+    const total = 900 + ((m.number.charCodeAt(6) * 37 + n * 211) % 2400);
+    invoices.push(oldInv(`inv-${m.id}-${n}`, `INV-${m.number.slice(2, 4)}${String(n).padStart(2, '0')}${m.id.slice(2)}`, m.id, daysBetweenISO(addDays(m.opened, d), todayISO()), total, Math.max(0, daysBetweenISO(addDays(m.opened, d + 21), todayISO()))));
+  }
+}
+function daysBetweenISO(a: string, b: string) {
+  return Math.round((new Date(b + 'T12:00:00').getTime() - new Date(a + 'T12:00:00').getTime()) / 86400000);
+}
+

@@ -410,7 +410,7 @@ function UsersEditor() {
         <div className="panel-head"><h2>People</h2><span className="small muted">Each person gets a role and the practice areas whose Client matters they can see.</span></div>
         <div className="table-wrap">
           <table className="t">
-            <thead><tr><th>Person</th><th>Role</th><th>Practice areas</th><th /></tr></thead>
+            <thead><tr><th>Person</th><th>Role</th><th>Practice areas</th><th>Measured on</th><th /></tr></thead>
             <tbody>
               {TEAM.map((t) => {
                 const u = s.users.find((x) => x.userId === t.id) ?? { userId: t.id, roleId: 'paralegal', areas: 'all' as const };
@@ -439,6 +439,20 @@ function UsersEditor() {
                           </label>
                         ))}
                       </div>
+                    </td>
+                    <td style={{ minWidth: 170 }}>
+                      <select className="input small tight" id={`u-measure-${t.id}`} aria-label="Measured on" value={u.measure ?? ''} onChange={(e) => setUser({ ...u, measure: (e.target.value || undefined) as UserAccess['measure'] })}>
+                        <option value="">Not tracked</option>
+                        <option value="fixed">Fixed-price fees (paid)</option>
+                        <option value="hourly">Hourly (billed & collected)</option>
+                        <option value="both">Both</option>
+                      </select>
+                      {u.measure && (
+                        <div className="row small" style={{ gap: 4, marginTop: 4, flexWrap: 'nowrap' }}>
+                          <span className="muted">Goal/qtr $</span>
+                          <input className="input small tight num" style={{ width: 90 }} type="number" min={0} step={1000} id={`u-goal-${t.id}`} aria-label="Quarterly goal" value={u.goal ?? ''} onChange={(e) => setUser({ ...u, goal: Number(e.target.value) || undefined })} />
+                        </div>
+                      )}
                     </td>
                     <td className="r">{t.id !== access.user && <button className="btn sm ghost" onClick={() => { actions.setViewAs(t.id); notify(`Now previewing ${t.name}’s view`); }}>View as</button>}</td>
                   </tr>

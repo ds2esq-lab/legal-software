@@ -21,6 +21,7 @@ export type Screen =
   | 'scheduling'
   | 'tasks'
   | 'trust'
+  | 'performance'
   | 'messages'
   | 'phone'
   | 'portal'
@@ -69,7 +70,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v5';
+const CONFIG_KEY = 'docket.config.v6';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -395,6 +396,7 @@ function useStoreValue() {
             stageId: area.stages[0].id,
             planType,
             owner: p.owner === 'dana' || p.owner === 'priya' ? 'me' : p.owner,
+            originator: p.owner === 'marcus' ? 'marcus' : 'me',
             ball: 'client',
             billing: { kind: 'flat', amount: 0 },
             priority: false,

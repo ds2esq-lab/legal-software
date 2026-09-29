@@ -14,6 +14,7 @@ import Calendar from './screens/Calendar';
 import Scheduling from './screens/Scheduling';
 import Tasks, { TaskDrawer } from './screens/Tasks';
 import Trust from './screens/Trust';
+import Performance from './screens/Performance';
 import Messages from './screens/Messages';
 import Phone from './screens/Phone';
 import Portal from './screens/Portal';
@@ -33,7 +34,8 @@ const NAV: { group?: string; id: Screen; label: string }[] = [
   { group: 'Clients', id: 'scheduling', label: 'Scheduling' },
   { id: 'portal', label: 'Client portal' },
   { id: 'phone', label: 'Phone' },
-  { group: 'Firm', id: 'settings', label: 'Settings' },
+  { group: 'Firm', id: 'performance', label: 'Performance' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 function useTick(active: boolean) {
@@ -114,6 +116,7 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
     case 'contacts': case 'contact': case 'conflicts': return can('contacts');
     case 'time': return can('billingView');
     case 'trust': return can('payments');
+    case 'performance': return can('reports') || can('billingView');
     case 'portal': case 'phone': return can('matters');
     case 'settings': return can('settings') || can('users');
     default: return true;
@@ -139,6 +142,7 @@ export default function App() {
     scheduling: <Scheduling />,
     tasks: <Tasks />,
     trust: <Trust />,
+    performance: <Performance />,
     messages: <Messages />,
     phone: <Phone />,
     portal: <Portal />,
