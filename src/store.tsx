@@ -186,8 +186,14 @@ function useStoreValue() {
           target.kind === 'matter' ? { ...x, matters: flip(x.matters) } : target.kind === 'pnc' ? { ...x, pncs: flip(x.pncs) } : { ...x, contacts: flip(x.contacts) },
         );
       },
-      recordConflict(pncId: string, check: ConflictCheck) {
-        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === pncId ? { ...p, conflict: check, stage: check.result === 'conflict' ? 'declined' : p.stage } : p)) }));
+      /** Attach a conflict check report to a PNC matter or Client matter (newest first). */
+      recordConflict(target: Target, check: Omit<ConflictCheck, 'id'>) {
+        const c: ConflictCheck = { ...check, id: newId('cc') };
+        setS((x) =>
+          target.kind === 'pnc'
+            ? { ...x, pncs: x.pncs.map((p) => (p.id === target.id ? { ...p, conflicts: [c, ...p.conflicts], stage: c.result === 'conflict' ? 'declined' : p.stage } : p)) }
+            : { ...x, matters: x.matters.map((m) => (m.id === target.id ? { ...m, conflicts: [c, ...m.conflicts] } : m)) },
+        );
       },
       setRoles(roles: Role[]) {
         setS((x) => ({ ...x, roles }));
@@ -237,7 +243,7 @@ function useStoreValue() {
         setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, touches: { ...p.touches, [key]: todayISO() } } : p)) }));
       },
       /** New PNC matter. Pass an existing contact id, or new contact details to create one. */
-      addPnc(p: Omit<Pnc, 'id' | 'touches' | 'parties' | 'notes'>, who: { contactId: string } | Omit<Contact, 'id' | 'notes'>, others: Party[] = []): string {
+      addPnc(p: Omit<Pnc, 'id' | 'touches' | 'parties' | 'notes' | 'conflicts'>, who: { contactId: string } | Omit<Contact, 'id' | 'notes'>, others: Party[] = []): string {
         const id = newId('p');
         setS((x) => {
           let contacts = x.contacts;
@@ -247,7 +253,7 @@ function useStoreValue() {
             contactId = newId('ct');
             contacts = [...contacts, { ...who, id: contactId, notes: [] }];
           }
-          const pnc: Pnc = { ...p, id, touches: {}, notes: [], parties: [{ contactId, role: 'client', primary: true }, ...others] };
+          const pnc: Pnc = { ...p, id, touches: {}, notes: [], conflicts: [], parties: [{ contactId, role: 'client', primary: true }, ...others] };
           return { ...x, contacts, pncs: [pnc, ...x.pncs] };
         });
         return id;
@@ -266,6 +272,7 @@ function useStoreValue() {
             name: `${primary?.name.split(',')[0] ?? 'New'} ${area.name}`,
             parties: p.parties,
             notes: [],
+            conflicts: p.conflicts,
             status: 'open',
             pncId: p.id,
             areaId,
@@ -372,7 +379,7 @@ function useStoreValue() {
           const contactId = newId('ct');
           const contacts = isProspect ? [...x.contacts, { id: contactId, name, kind: 'person' as const, phone, email: '', notes: [] }] : x.contacts;
           const pncs: Pnc[] = isProspect
-            ? [{ id: pncId, title: answers[0] || 'Consultation', parties: [{ contactId, role: 'client', primary: true }], source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: start, touches: {}, owner: 'me', notes: answers[1] ? [{ id: newId('n'), at: new Date().toISOString(), author: 'system', text: `Others named at booking: ${answers[1]}` }] : [] }, ...x.pncs]
+            ? [{ id: pncId, title: answers[0] || 'Consultation', parties: [{ contactId, role: 'client', primary: true }], source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: start, touches: {}, owner: 'me', conflicts: [], notes: answers[1] ? [{ id: newId('n'), at: new Date().toISOString(), author: 'system', text: `Others named at booking: ${answers[1]}` }] : [] }, ...x.pncs]
             : x.pncs;
           const ev: CalEvent = { id: newId('e'), title: `${isProspect ? 'Consult' : type.name}: ${name.split(',')[0]}`, start, minutes: type.minutes, pncId: isProspect ? pncId : undefined, kind: 'consult' };
           const msg: Message = {

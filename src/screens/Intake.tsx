@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { PNC_STAGES, TEAM, type Pnc, type PncStage } from '../data';
 import { searchConflicts, summarize } from '../conflicts';
+import { ConflictBadge } from '../conflictPanel';
 import { nextTouch, touchesFor } from '../intake';
 import { addDays, newId, todayISO } from '../practice';
 import { DuePill, fmtDate, fmtTime, PageHead, Person, relDay } from '../ui';
@@ -43,9 +44,7 @@ export function HireForm({ p, onDone }: { p: Pnc; onDone: () => void }) {
 }
 
 function ConflictPill({ p }: { p: Pnc }) {
-  if (!p.conflict) return <span className="pill warn">Conflicts: not run</span>;
-  const r = p.conflict.result;
-  return <span className={`pill ${r === 'conflict' ? 'danger' : r === 'waived' ? 'warn' : 'ok'}`}>Conflicts: {r}</span>;
+  return <ConflictBadge checks={p.conflicts} parties={p.parties} />;
 }
 
 function PncCard({ p }: { p: Pnc }) {

@@ -101,6 +101,7 @@ export interface Matter {
   closedOn?: string;
   closeout?: Closeout;
   notes: Note[];
+  conflicts: ConflictCheck[];
   pncId?: string; // the PNC matter it came from
 }
 
@@ -198,11 +199,24 @@ export const PNC_STAGES: { id: PncStage; label: string; open: boolean }[] = [
   { id: 'declined', label: 'Declined (conflict)', open: false },
 ];
 
+/** What one match looked like when the check was run: kept as a record even if data changes later. */
+export interface ConflictSnapshotHit {
+  name: string;
+  strength: 'exact' | 'likely' | 'possible';
+  reason: string;
+  severity: 0 | 1 | 2;
+  on: string[]; // "Client · Brennan Estate Plan · Open matter"
+}
+
+/** A conflict check attached to a PNC matter or Client matter. Newest first in the list. */
 export interface ConflictCheck {
+  id: string;
   date: string;
   by: string;
-  terms: string[];
+  terms: string[]; // who was searched
+  partyIds?: string[]; // contacts on the matter at the time (to spot people added later)
   hits: number;
+  snapshot?: ConflictSnapshotHit[];
   result: 'clear' | 'waived' | 'conflict';
   note?: string;
 }
@@ -221,7 +235,7 @@ export interface Pnc {
   touches: Record<string, string>; // touch key -> date done
   owner: string;
   matterId?: string; // set once hired
-  conflict?: ConflictCheck;
+  conflicts: ConflictCheck[];
   notes: Note[];
 }
 
@@ -437,6 +451,7 @@ const openMatters: Matter[] = seeds.map((s, i) => {
     opened: day(-engaged),
     status: 'open',
     notes: s.notes ?? [],
+    conflicts: [],
   };
 });
 
@@ -469,6 +484,7 @@ const formerMatters: Matter[] = formerSeeds.map(([last, , areaId, closedAgo, pla
     status: 'closed',
     closedOn: day(-closedAgo),
     closeout: { financials: true, letterSent: day(-closedAgo + 3), review: i % 4 === 0 ? 'Ask First' : 'Definitely', reviewRequested: i % 3 === 0 ? day(-closedAgo + 5) : undefined },
+    conflicts: [],
     notes: last === 'Dunleavy' ? [note('n-fm-d', closedAgo + 30, 'me', 'Sister (Margo Dunleavy) contested the will; settled at mediation. Do not represent Margo in anything related.', true)] : [],
   };
 });
@@ -479,19 +495,43 @@ export const matters: Matter[] = [...openMatters, ...formerMatters];
 
 const pp = (id: string, role = 'client', primary = true): Party => ({ contactId: id, role, primary });
 
-export const pncs: Pnc[] = [
+const pncSeeds: (Omit<Pnc, 'conflicts'> & { conflicts?: ConflictCheck[] })[] = [
   { id: 'p1', title: 'Update estate plan after divorce', parties: [pp('pc1')], source: 'Returning client', areaId: 'ep', stage: 'inquiry', firstContact: day(-4), touches: { 's:2': day(-2) }, owner: 'dana', notes: [note('n-p1', 4, 'dana', 'Former client (2024 will). Divorced last year, wants a trust now.')] },
   { id: 'p2', title: 'Probate of mother’s estate; sibling dispute', parties: [pp('pc2', 'pr'), pp('pc11', 'beneficiary', false), { contactId: 'c4', role: 'opposing' }], source: 'Referral: past client', areaId: 'fpet', stage: 'inquiry', firstContact: day(-1), touches: {}, owner: 'dana',
     notes: [note('n-p2', 1, 'dana', 'Caller says her cousin Riley Brennan is contesting the will. Ran conflict check. Needs attorney review before booking.')] },
-  { id: 'p3', title: 'Trust for blended family', parties: [pp('pc3')], source: 'Google', areaId: 'ep', stage: 'scheduled', firstContact: day(-6), consultAt: at(4, 10), touches: { 'c:-10': day(-6) }, owner: 'me', notes: [], conflict: { date: day(-6), by: 'dana', terms: ['Lindgren, Sage'], hits: 0, result: 'clear' } },
-  { id: 'p4', title: 'Wills and powers of attorney', parties: [pp('pc4')], source: 'Seminar', areaId: 'ep', stage: 'scheduled', firstContact: day(-9), consultAt: at(1, 14), touches: { 'c:-10': day(-9), 'c:-4': day(-3) }, owner: 'me', notes: [], conflict: { date: day(-9), by: 'dana', terms: ['Pacheco, Tatum'], hits: 0, result: 'clear' } },
-  { id: 'p5', title: 'Guardianship of adult son', parties: [pp('pc5', 'petitioner'), pp('pc12', 'ward', false)], source: 'Website form', areaId: 'gc', stage: 'notes', firstContact: day(-12), consultAt: at(-1, 11), touches: {}, owner: 'me', notes: [], conflict: { date: day(-12), by: 'dana', terms: ['Byrne, Arden', 'Byrne, Colleen'], hits: 0, result: 'clear' } },
-  { id: 'p6', title: 'Trust; rental properties', parties: [pp('pc6')], source: 'Referral: financial advisor', areaId: 'ep', stage: 'followup', firstContact: day(-20), consultAt: at(-5, 15), touches: { 'f:2': day(-3) }, owner: 'me', notes: [note('n-p6', 5, 'me', 'Good fit for Signature Trust. Quoted couples price. Wants to talk to spouse first.')], conflict: { date: day(-20), by: 'dana', terms: ['Hartmann, Marlow'], hits: 0, result: 'clear' } },
-  { id: 'p7', title: 'Deed to add daughter', parties: [pp('pc7')], source: 'Google', areaId: 'deed', stage: 'followup', firstContact: day(-15), consultAt: at(-8, 9, 30), touches: { 'f:2': day(-6), 'f:5': day(-3) }, owner: 'dana', notes: [], conflict: { date: day(-15), by: 'dana', terms: ['Iwu, Blake'], hits: 0, result: 'clear' } },
-  { id: 'p8', title: 'Estate plan, first home', parties: [pp('pc8')], source: 'Referral: past client', areaId: 'ep', stage: 'el', firstContact: day(-18), consultAt: at(-9, 13), elSent: day(-3), touches: { 'f:2': day(-7), 'e:1': day(-2) }, owner: 'me', notes: [], conflict: { date: day(-18), by: 'dana', terms: ['Sato, Drew'], hits: 0, result: 'clear' } },
-  { id: 'p9', title: 'LLC for consulting business', parties: [pp('pc9')], source: 'Website form', areaId: 'biz', stage: 'future', firstContact: day(-40), consultAt: at(-30, 10), futureDate: day(45), touches: {}, owner: 'marcus', notes: [note('n-p9', 30, 'marcus', 'Launching in January. Call back mid-November.')], conflict: { date: day(-40), by: 'dana', terms: ['Keane, Finley'], hits: 0, result: 'clear' } },
-  { id: 'p10', title: 'Will review', parties: [pp('pc10')], source: 'Google', areaId: 'ep', stage: 'lost', firstContact: day(-35), consultAt: at(-28, 10), touches: {}, owner: 'me', notes: [note('n-p10', 20, 'me', 'Went with an online service on price.')], conflict: { date: day(-35), by: 'dana', terms: ['Molina, Reese'], hits: 0, result: 'clear' } },
+  { id: 'p3', title: 'Trust for blended family', parties: [pp('pc3')], source: 'Google', areaId: 'ep', stage: 'scheduled', firstContact: day(-6), consultAt: at(4, 10), touches: { 'c:-10': day(-6) }, owner: 'me', notes: [], conflicts: [{ id: 'cc-seed-1', date: day(-6), by: 'dana', terms: ['Lindgren, Sage'], hits: 0, result: 'clear' }] },
+  { id: 'p4', title: 'Wills and powers of attorney', parties: [pp('pc4')], source: 'Seminar', areaId: 'ep', stage: 'scheduled', firstContact: day(-9), consultAt: at(1, 14), touches: { 'c:-10': day(-9), 'c:-4': day(-3) }, owner: 'me', notes: [], conflicts: [{ id: 'cc-seed-2', date: day(-9), by: 'dana', terms: ['Pacheco, Tatum'], hits: 0, result: 'clear' }] },
+  { id: 'p5', title: 'Guardianship of adult son', parties: [pp('pc5', 'petitioner'), pp('pc12', 'ward', false)], source: 'Website form', areaId: 'gc', stage: 'notes', firstContact: day(-12), consultAt: at(-1, 11), touches: {}, owner: 'me', notes: [], conflicts: [{ id: 'cc-seed-3', date: day(-12), by: 'dana', terms: ['Byrne, Arden', 'Byrne, Colleen'], hits: 0, result: 'clear' }] },
+  { id: 'p6', title: 'Trust; rental properties', parties: [pp('pc6')], source: 'Referral: financial advisor', areaId: 'ep', stage: 'followup', firstContact: day(-20), consultAt: at(-5, 15), touches: { 'f:2': day(-3) }, owner: 'me', notes: [note('n-p6', 5, 'me', 'Good fit for Signature Trust. Quoted couples price. Wants to talk to spouse first.')], conflicts: [{ id: 'cc-seed-4', date: day(-20), by: 'dana', terms: ['Hartmann, Marlow'], hits: 0, result: 'clear' }] },
+  { id: 'p7', title: 'Deed to add daughter', parties: [pp('pc7')], source: 'Google', areaId: 'deed', stage: 'followup', firstContact: day(-15), consultAt: at(-8, 9, 30), touches: { 'f:2': day(-6), 'f:5': day(-3) }, owner: 'dana', notes: [], conflicts: [{ id: 'cc-seed-5', date: day(-15), by: 'dana', terms: ['Iwu, Blake'], hits: 0, result: 'clear' }] },
+  { id: 'p8', title: 'Estate plan, first home', parties: [pp('pc8')], source: 'Referral: past client', areaId: 'ep', stage: 'el', firstContact: day(-18), consultAt: at(-9, 13), elSent: day(-3), touches: { 'f:2': day(-7), 'e:1': day(-2) }, owner: 'me', notes: [], conflicts: [{ id: 'cc-seed-6', date: day(-18), by: 'dana', terms: ['Sato, Drew'], hits: 0, result: 'clear' }] },
+  { id: 'p9', title: 'LLC for consulting business', parties: [pp('pc9')], source: 'Website form', areaId: 'biz', stage: 'future', firstContact: day(-40), consultAt: at(-30, 10), futureDate: day(45), touches: {}, owner: 'marcus', notes: [note('n-p9', 30, 'marcus', 'Launching in January. Call back mid-November.')], conflicts: [{ id: 'cc-seed-7', date: day(-40), by: 'dana', terms: ['Keane, Finley'], hits: 0, result: 'clear' }] },
+  { id: 'p10', title: 'Will review', parties: [pp('pc10')], source: 'Google', areaId: 'ep', stage: 'lost', firstContact: day(-35), consultAt: at(-28, 10), touches: {}, owner: 'me', notes: [note('n-p10', 20, 'me', 'Went with an online service on price.')], conflicts: [{ id: 'cc-seed-8', date: day(-35), by: 'dana', terms: ['Molina, Reese'], hits: 0, result: 'clear' }] },
 ];
+
+export const pncs: Pnc[] = pncSeeds.map((p) => ({
+  ...p,
+  conflicts: (p.conflicts ?? []).map((c) => ({ ...c, partyIds: p.parties.map((x) => x.contactId) })),
+}));
+
+// Every open and former matter carries the check from when it was opened.
+// Two are left without one on purpose, and m1 has people added after its check, to show the warnings.
+let ccN = 0;
+for (const m of [...openMatters, ...formerMatters]) {
+  if (m.id === 'm15' || m.id === 'm20') continue;
+  const checked = m.id === 'm1' ? m.parties.slice(0, 2) : m.parties;
+  m.conflicts.push({
+    id: `cc-m-${++ccN}`,
+    date: addDays(m.opened, -3),
+    by: 'dana',
+    terms: checked.map((x) => contactsList.find((c) => c.id === x.contactId)?.name ?? ''),
+    partyIds: checked.map((x) => x.contactId),
+    hits: m.id === 'm10' ? 1 : 0,
+    snapshot: m.id === 'm10' ? [{ name: 'Marsh, Evelyn', strength: 'exact', reason: 'Appears on a firm matter', severity: 0, on: ['Opposing Party · (this matter, pre-engagement)'] }] : [],
+    result: 'clear',
+    note: m.id === 'm10' ? 'Opposing party is new to the firm. Clear.' : undefined,
+  });
+}
 
 // ---------- Everything else (unchanged from v1, pointed at the new matters) ----------
 

@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { PNC_STAGES, TEAM, teamName, type PncStage } from '../data';
-import { searchConflicts, summarize, type Term } from '../conflicts';
+import { PNC_STAGES, TEAM, type PncStage } from '../data';
 import { touchesFor } from '../intake';
-import { todayISO } from '../practice';
 import { NotesPanel, PartiesPanel } from '../people';
 import { DuePill, fmtDate, PageHead } from '../ui';
-import { HitList, SummaryBanner } from './Conflicts';
+import { ConflictBadge, ConflictPanel } from '../conflictPanel';
 import { HireForm } from './Intake';
 
 export default function PncDetail() {
@@ -18,33 +16,15 @@ export default function PncDetail() {
   const touches = touchesFor(p, s.cadences);
   const up = (patch: Parameters<typeof actions.updatePnc>[1]) => actions.updatePnc(p.id, patch);
 
-  // Conflict check straight from the people on this PNC matter
-  const terms: Term[] = p.parties.flatMap((party) => {
-    const c = lookup.contact(party.contactId);
-    if (!c) return [];
-    const side = lookup.role(party.role).side;
-    return [{ text: c.name, side }, ...(c.aka ? [{ text: c.aka.replace(/\(.*?\)/g, ''), side }] : []), ...(c.phone ? [{ text: c.phone, side }] : [])];
-  });
-  const hits = searchConflicts(terms, s.contacts, s.matters, s.pncs, s.roles, p.id);
-  const sum = summarize(hits);
-  const record = (result: 'clear' | 'waived' | 'conflict') => {
-    actions.recordConflict(p.id, { date: todayISO(), by: 'me', terms: p.parties.map((x) => lookup.contact(x.contactId)?.name ?? ''), hits: hits.length, result });
-    notify(result === 'conflict' ? 'Recorded as a conflict. PNC matter declined.' : `Conflict check recorded: ${result}.`);
-  };
-
   return (
     <>
       <div className="small"><button className="link" onClick={() => go('intake')}>← PNC matters</button></div>
       <PageHead title={primary?.name ?? 'Unnamed prospect'} sub={`PNC matter · ${p.title} · ${p.areaId ? lookup.area(p.areaId)?.name : 'Area not set'} · first contact ${fmtDate(p.firstContact)}`}>
-        {p.conflict ? (
-          <span className={`pill ${p.conflict.result === 'conflict' ? 'danger' : p.conflict.result === 'waived' ? 'warn' : 'ok'}`}>Conflicts: {p.conflict.result}</span>
-        ) : (
-          <span className="pill warn">Conflict check not recorded</span>
-        )}
+        <ConflictBadge checks={p.conflicts} parties={p.parties} />
         {p.matterId ? (
           <button className="btn primary" onClick={() => go('matter', p.matterId)}>Open Client matter →</button>
         ) : (
-          <button className="btn primary" disabled={p.conflict?.result === 'conflict'} onClick={() => setHiring(true)}>Hired → open Client matter</button>
+          <button className="btn primary" disabled={p.conflicts[0]?.result === 'conflict'} onClick={() => setHiring(true)}>Hired → open Client matter</button>
         )}
       </PageHead>
 
@@ -58,23 +38,7 @@ export default function PncDetail() {
 
       <div className="grid cols-main">
         <div className="stack" style={{ gap: 16 }}>
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Conflict check</h2>
-              {p.conflict && <span className="small muted">Recorded {fmtDate(p.conflict.date)} by {teamName(p.conflict.by)}: {p.conflict.result}</span>}
-            </div>
-            <div className="panel-body stack" style={{ gap: 10 }}>
-              <SummaryBanner hits={hits} />
-              <span className="small muted">Runs automatically on everyone listed below, including phone numbers and former names. Add the other side’s names to “People” to include them.</span>
-            </div>
-            <HitList hits={hits} />
-            <div className="panel-body row" style={{ borderTop: '1px solid var(--line)' }}>
-              <span className="small">Attorney decision:</span>
-              <button className="btn sm" onClick={() => record('clear')} disabled={sum.level === 'danger'}>Clear</button>
-              <button className="btn sm" onClick={() => record('waived')}>Waived (written consent)</button>
-              <button className="btn sm danger" onClick={() => record('conflict')}>Conflict: decline</button>
-            </div>
-          </section>
+          <ConflictPanel target={{ kind: 'pnc', id: p.id }} parties={p.parties} checks={p.conflicts} />
 
           <PartiesPanel target={{ kind: 'pnc', id: p.id }} parties={p.parties} title="People on this PNC matter" />
 

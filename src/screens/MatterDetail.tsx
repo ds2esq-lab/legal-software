@@ -7,8 +7,9 @@ import { dueFor, ruleText, todayISO, type PracticeArea } from '../practice';
 import { BallSelect, billingLabel, ContactPill, DateField, DuePill, fmtDate, PageHead, Person, StagePill } from '../ui';
 import Thread from '../Thread';
 import { NotesPanel, PartiesPanel } from '../people';
+import { ConflictBadge, ConflictPanel, uncheckedParties } from '../conflictPanel';
 
-type Tab = 'timeline' | 'notes' | 'time' | 'billing' | 'messages' | 'documents';
+type Tab = 'timeline' | 'notes' | 'conflicts' | 'time' | 'billing' | 'messages' | 'documents';
 
 export function InvoicePreview({ m }: { m: Matter }) {
   const { s, actions, notify } = useStore();
@@ -264,6 +265,7 @@ export default function MatterDetail() {
       <div className="small"><button className="link" onClick={() => go('matters')}>← Matters</button></div>
       <PageHead title={m.name} sub={`${client?.name} · ${area.name}${m.planType ? ` · ${m.planType}` : ''} · Matter ${m.number}`}>
         <StagePill m={m} />
+        <button className="badge-btn" onClick={() => setTab('conflicts')} title="Open the conflict check"><ConflictBadge checks={m.conflicts} parties={m.parties} /></button>
         {m.stalled && <span className="pill warn">Stalled</span>}
         <button className="btn" onClick={() => go('portal', m.id)}>View client portal</button>
       </PageHead>
@@ -359,15 +361,17 @@ export default function MatterDetail() {
       {(closing || m.status === 'closed') && <Closeout m={m} />}
 
       <div className="tabs" role="tablist">
-        {(['timeline', 'notes', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
+        {(['timeline', 'notes', 'conflicts', 'time', 'billing', 'messages', 'documents'] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
             {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
+            {t === 'conflicts' && (m.conflicts.length === 0 || uncheckedParties(m.conflicts, m.parties).length > 0) && <span className="dot-warn" aria-label="needs attention" />}
           </button>
         ))}
       </div>
 
       {tab === 'timeline' && <Timeline m={m} area={area} />}
+      {tab === 'conflicts' && <ConflictPanel target={{ kind: 'matter', id: m.id }} parties={m.parties} checks={m.conflicts} />}
       {tab === 'notes' && <NotesPanel target={{ kind: 'matter', id: m.id }} notes={m.notes} />}
       {tab === 'time' && <TimeTab m={m} />}
       {tab === 'billing' && (

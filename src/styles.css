@@ -351,3 +351,8 @@ button.stat:hover { background: var(--surface-2); }
 .banner.sev-ok { background: var(--ok-soft); color: var(--ok); }
 select.input, input.input { max-width: 100%; }
 .link-pill { white-space: normal; text-align: left; }
+
+/* ---------- v4: conflict records ---------- */
+.badge-btn { border: 0; background: none; padding: 0; cursor: pointer; }
+.dot-warn { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); margin-left: 5px; vertical-align: middle; }
+.report { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; width: 100%; }

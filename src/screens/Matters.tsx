@@ -5,6 +5,7 @@ import { dueMilestones } from '../calc';
 import { contactState } from '../practice';
 import { BallSelect, ContactPill, DateField, DuePill, fmtDate, PageHead, Person } from '../ui';
 import { CopyText } from '../people';
+import { ConflictBadge } from '../conflictPanel';
 
 type View = 'board' | 'table';
 
@@ -119,6 +120,9 @@ export default function Matters() {
                   <div className="small muted">
                     {m.planType ?? a.name} · <span className="num">{m.number}</span>
                     {m.stalled && <span className="pill warn" style={{ marginLeft: 6 }}>Stalled</span>}
+                  </div>
+                  <div className="small" style={{ marginTop: 2 }}>
+                    <ConflictBadge checks={m.conflicts} parties={m.parties} />
                   </div>
                 </td>
                 <td style={{ minWidth: 150 }}>
