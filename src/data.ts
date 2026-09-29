@@ -201,6 +201,7 @@ export interface CalEvent {
   matterId?: string;
   pncId?: string;
   kind: 'consult' | 'court' | 'meeting' | 'call' | 'block';
+  host?: string; // whose calendar it's on (defaults to the managing attorney)
 }
 
 export interface Message {

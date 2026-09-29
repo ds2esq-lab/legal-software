@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import * as seed from './data';
 import type { Invoice, InvoiceLine, Perm, PermRole, UserAccess } from './data';
 import * as trust from './trust';
+import * as sched from './sched';
+import type { Booking, MeetingType, RoutingForm, Schedule } from './sched';
 import type { BankTxn, Expense, Reconciliation, Replenishment, TrustTxn } from './trust';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
 import { billedMinutes, DEFAULT_BILLING, type BillingSettings } from './billing';
@@ -56,6 +58,10 @@ interface State {
   replenishments: Replenishment[];
   expenses: Expense[];
   reconciliations: Reconciliation[];
+  meetingTypes: MeetingType[];
+  schedules: Schedule[];
+  routing: RoutingForm;
+  bookings: Booking[];
   timeEntries: TimeEntry[];
   flatFees: seed.FlatFee[];
   invoices: Invoice[];
@@ -70,8 +76,8 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v6';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering'>> {
+const CONFIG_KEY = 'docket.config.v8';
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -99,6 +105,10 @@ function initialState(): State {
     replenishments: trust.replenishments,
     expenses: trust.expenses,
     reconciliations: trust.reconciliations,
+    meetingTypes: cfg.meetingTypes ?? sched.MEETING_TYPES,
+    schedules: cfg.schedules ?? sched.SCHEDULES,
+    routing: cfg.routing ?? sched.ROUTING,
+    bookings: [],
     timeEntries: seed.timeEntries,
     flatFees: seed.flatFees,
     invoices: seed.invoices,
@@ -185,11 +195,11 @@ function useStoreValue() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering]);
+  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -726,6 +736,71 @@ function useStoreValue() {
       },
       updateEventType(id: string, patch: Partial<seed.EventType>) {
         setS((x) => ({ ...x, eventTypes: x.eventTypes.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+      },
+
+      // ----- Scheduling (v2) -----
+      saveMeetingType(m: MeetingType) {
+        setS((x) => ({ ...x, meetingTypes: x.meetingTypes.some((q) => q.id === m.id) ? x.meetingTypes.map((q) => (q.id === m.id ? m : q)) : [...x.meetingTypes, m] }));
+      },
+      deleteMeetingType(id: string) {
+        setS((x) => ({ ...x, meetingTypes: x.meetingTypes.filter((q) => q.id !== id) }));
+      },
+      saveSchedule(sc: Schedule) {
+        setS((x) => ({ ...x, schedules: x.schedules.some((q) => q.id === sc.id) ? x.schedules.map((q) => (q.id === sc.id ? sc : q)) : [...x.schedules, sc] }));
+      },
+      deleteSchedule(id: string) {
+        setS((x) => ({ ...x, schedules: x.schedules.filter((q) => q.id !== id) }));
+      },
+      saveRouting(r: RoutingForm) {
+        setS((x) => ({ ...x, routing: r }));
+      },
+      /** A booking. Prospects become a PNC matter (with contact); clients attach to their matter. */
+      bookMeeting(b: Omit<Booking, 'id' | 'status' | 'eventId' | 'pncId'> & { phone?: string; email?: string }) {
+        setS((x) => {
+          const mt = x.meetingTypes.find((q) => q.id === b.meetingTypeId)!;
+          const id = newId('bk');
+          const eventId = newId('e');
+          let contacts = x.contacts;
+          let pncs = x.pncs;
+          let pncId: string | undefined;
+          if (mt.audience === 'prospects' && !b.matterId) {
+            const contactId = newId('ct');
+            pncId = newId('p');
+            contacts = [...contacts, { id: contactId, name: b.who, kind: 'person', phone: b.phone ?? '', email: b.email ?? '', notes: [] }];
+            const others = Object.entries(b.answers).filter(([k, v]) => v && k === 'q-others').map(([, v]) => v).join('; ');
+            pncs = [
+              { id: pncId, title: `${mt.name}${b.answers.need ? `: ${b.answers.need}` : ''}`, parties: [{ contactId, role: 'client', primary: true }], source: 'Online booking', stage: 'scheduled', firstContact: todayISO(), consultAt: b.start, touches: {}, owner: b.host, notes: others ? [{ id: newId('n'), at: new Date().toISOString(), author: 'system', text: `Others named at booking (for conflict check): ${others}` }] : [], conflicts: [] },
+              ...pncs,
+            ];
+          }
+          const place = sched.PLACES.find((p) => p.id === b.place);
+          const ev: CalEvent = { id: eventId, title: `${mt.name}: ${b.who.split(',')[0]}`, start: b.start, minutes: b.minutes, matterId: b.matterId, pncId, kind: mt.audience === 'prospects' ? 'consult' : place?.kind === 'phone-out' || place?.kind === 'phone-in' ? 'call' : 'meeting', host: b.host };
+          const booking: Booking = { ...b, id, status: 'booked', eventId, pncId };
+          const msg: Message = { id: newId('msg'), channel: mt.audience === 'prospects' ? 'intake' : b.matterId ?? 'general', author: 'system', text: `${b.who} booked ${mt.name} with ${seed.teamName(b.host)} (${place?.name}).`, at: new Date().toISOString(), clientVisible: false };
+          return { ...x, contacts, pncs, bookings: [booking, ...x.bookings], events: [...x.events, ev], messages: [...x.messages, msg] };
+        });
+      },
+      /** Held: marks the linked milestone done and counts as client contact. No-show: logged for show-rate. */
+      setBookingStatus(id: string, status: Booking['status']) {
+        setS((x) => {
+          const b = x.bookings.find((q) => q.id === id);
+          if (!b) return x;
+          let next: State = { ...x, bookings: x.bookings.map((q) => (q.id === id ? { ...q, status } : q)) };
+          if (status === 'cancelled') next = { ...next, events: next.events.filter((e) => e.id !== b.eventId) };
+          const mt = x.meetingTypes.find((q) => q.id === b.meetingTypeId);
+          if (status === 'held' && b.matterId) {
+            const m = x.matters.find((q) => q.id === b.matterId);
+            const area = m && x.areas.find((a) => a.id === m.areaId);
+            const ms = mt?.completesMilestone && area?.milestones.find((q) => q.name.toLowerCase() === mt.completesMilestone!.toLowerCase());
+            next = {
+              ...next,
+              matters: next.matters.map((q) => (q.id === b.matterId ? { ...q, lastContact: b.start.slice(0, 10), milestones: ms && !q.milestones[ms.id]?.done ? { ...q.milestones, [ms.id]: { ...q.milestones[ms.id], done: b.start.slice(0, 10) } } : q.milestones } : q)),
+            };
+            if (ms) next = maybeDraw(next, b.matterId, ms.id, x.viewAs);
+          }
+          if (status === 'held' && b.pncId) next = { ...next, pncs: next.pncs.map((p) => (p.id === b.pncId && p.stage === 'scheduled' ? { ...p, stage: 'notes' } : p)) };
+          return next;
+        });
       },
 
       // ----- Phone -----

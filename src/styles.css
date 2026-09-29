@@ -409,3 +409,9 @@ select.input, input.input { max-width: 100%; }
 .trend-val { font-size: 11px; }
 .trend-q { font-size: 11px; border-top: 1px solid var(--line); width: 100%; text-align: center; padding-top: 2px; }
 @media (max-width: 1100px) { .perf { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- v11: scheduling ---------- */
+.week-grid { display: flex; flex-direction: column; gap: 6px; }
+.wk-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.wk-row:first-child { border-top: 0; }
+.iv { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
