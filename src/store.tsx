@@ -114,7 +114,7 @@ function initialState(): State {
     schedules: cfg.schedules ?? sched.SCHEDULES,
     routing: cfg.routing ?? sched.ROUTING,
     bookings: [],
-    docSettings: cfg.docSettings ?? docs.DEFAULT_DOC_SETTINGS,
+    docSettings: { ...docs.DEFAULT_DOC_SETTINGS, ...cfg.docSettings },
     docFiles: docs.DOC_FILES,
     docFolders: {},
     timeEntries: seed.timeEntries,

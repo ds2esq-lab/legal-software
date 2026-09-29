@@ -9,6 +9,7 @@ export interface DocSettings {
   openRoot: string; // library folder for open matters
   closedRoot: string; // where former matters' folders move
   pattern: string; // folder name: {NUMBER} {CLIENT} {AREA} {YEAR}
+  groupByClient: boolean; // put each matter's folder inside a "Last, First" client folder (how OneDrive is organized today)
   templates: Record<string, string[]>; // subfolders per practice area
   moveOnClose: boolean;
 }
@@ -19,6 +20,7 @@ export const DEFAULT_DOC_SETTINGS: DocSettings = {
   closedRoot: 'Closed Matters',
   pattern: '{NUMBER} {CLIENT} – {AREA}',
   moveOnClose: true,
+  groupByClient: true,
   templates: {
     ep: ['01 Intake & Engagement', '02 Questionnaire & Info', '03 Drafts', '04 Signed Originals (scans)', '05 Funding', '06 Correspondence'],
     fpet: ['01 Intake & Engagement', '02 Court Filings', '03 Notices', '04 Inventory', '05 Accountings', '06 Asset Records', '07 Correspondence'],
@@ -52,6 +54,9 @@ export function folderName(s: DocSettings, m: Matter, clientName: string, area: 
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+// The client-level folder, e.g. "Whitford, Anne", or '' when matters sit directly in the library folder.
+export const clientFolder = (s: DocSettings, clientName: string) => (s.groupByClient ? clientName.trim() : '');
 
 export function subfolders(s: DocSettings, m: Matter, extra: Record<string, string[]>) {
   return [...(s.templates[m.areaId] ?? ['01 Documents']), ...(extra[m.id] ?? [])];

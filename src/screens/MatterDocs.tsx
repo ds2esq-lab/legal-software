@@ -15,6 +15,7 @@ export function MatterDocs({ m }: { m: Matter }) {
   const area = lookup.areaOf(m);
   const client = lookup.clientOf(m);
   const name = D.folderName(s.docSettings, m, client?.name ?? 'Client', area);
+  const parent = D.clientFolder(s.docSettings, client?.name ?? 'Client');
   const root = m.status === 'closed' && s.docSettings.moveOnClose ? s.docSettings.closedRoot : s.docSettings.openRoot;
   const folders = D.subfolders(s.docSettings, m, s.docFolders);
   const files = s.docFiles.filter((d) => d.matterId === m.id);
@@ -34,7 +35,7 @@ export function MatterDocs({ m }: { m: Matter }) {
     <section className="panel">
       <div className="panel-head" style={{ flexWrap: 'wrap' }}>
         <div className="crumbs small" aria-label="SharePoint location">
-          <span className="muted">{s.docSettings.site} › {root} ›</span>
+          <span className="muted">{s.docSettings.site} › {root} ›{parent && ` ${parent} ›`}</span>
           <button className="link" onClick={() => { setFolder(''); setQ(''); }}>{name}</button>
           {folder && <><span className="muted">›</span><strong>{folder}</strong></>}
         </div>

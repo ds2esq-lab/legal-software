@@ -422,10 +422,11 @@ function DocsEditor() {
             <div className="field"><label htmlFor="doc-closed">Folder for closed matters</label><input className="input" id="doc-closed" value={d.closedRoot} onChange={(e) => set({ closedRoot: e.target.value })} /></div>
           </div>
           <label className="row small" style={{ gap: 6 }}><input type="checkbox" id="doc-move" checked={d.moveOnClose} onChange={(e) => set({ moveOnClose: e.target.checked })} /> Move a matter’s folder to “{d.closedRoot}” when the matter closes</label>
+          <label className="row small" style={{ gap: 6 }}><input type="checkbox" id="doc-group" checked={d.groupByClient} onChange={(e) => set({ groupByClient: e.target.checked })} /> Keep each client’s matters together in a “Last, First” client folder</label>
           <div className="field">
             <label htmlFor="doc-pattern">Matter folder name</label>
             <input className="input num" id="doc-pattern" value={d.pattern} onChange={(e) => set({ pattern: e.target.value })} />
-            <span className="small muted">Building blocks: <code>{'{NUMBER}'}</code> <code>{'{CLIENT}'}</code> <code>{'{AREA}'}</code> <code>{'{YEAR}'}</code> · Example: <strong>{preview}</strong></span>
+            <span className="small muted">Building blocks: <code>{'{NUMBER}'}</code> <code>{'{CLIENT}'}</code> <code>{'{AREA}'}</code> <code>{'{YEAR}'}</code> · Example: <strong>{d.openRoot} › {d.groupByClient ? `${client?.name ?? 'Client'} › ` : ''}{preview}</strong></span>
           </div>
           <p className="small muted">Every PC keeps using the OneDrive sync app, pointed at this library, so files still open from File Explorer. The app shows each matter’s folder inside the matter and keeps the two in step.</p>
         </div>
@@ -450,6 +451,31 @@ function DocsEditor() {
         <div className="panel-body stack" style={{ gap: 6 }}>
           <AddRow id="add-tpl" placeholder="New folder, e.g. 07 Billing" onAdd={(v) => setTpl([...tpl, v])} />
           <span className="small muted">New {area?.name} matters get these folders automatically when they open.</span>
+        </div>
+      </section>
+      <section className="panel" style={{ gridColumn: '1 / -1' }}>
+        <div className="panel-head"><h2>Moving from OneDrive</h2><span className="pill warn">Plan · not started</span></div>
+        <div className="panel-body grid cols-2" style={{ gap: 16 }}>
+          <div className="stack small" style={{ gap: 6 }}>
+            <strong>What’s there today</strong>
+            <ul className="bullets">
+              <li>Client files sit in one person’s OneDrive, next to personal and back-office folders.</li>
+              <li>The layout is client folder › matter folder, e.g. <code>Last, First › 01234-Last</code>. The number is the old Clio matter number.</li>
+              <li>Some clients have two folders. The second has a long number on the end (<code>Last, First (1700000000)</code>) from a second Clio export.</li>
+              <li>Inside a matter there’s no fixed layout: a few ad-hoc folders (Drafts, Scans, Admin) and most files loose at the top, including copies of client IDs.</li>
+            </ul>
+          </div>
+          <div className="stack small" style={{ gap: 6 }}>
+            <strong>Steps</strong>
+            <ol className="bullets">
+              <li>Create the SharePoint site “Client Files” with <em>Open Matters</em> and <em>Closed Matters</em> folders. Only firm staff get access.</li>
+              <li>Import matters from Monday and Clio. Each matter gets its number and a folder built from the template above.</li>
+              <li>Copy each old matter folder as-is into the new matter’s <em>Imported from OneDrive</em> folder. Match on the Clio number, and merge the doubled client folders.</li>
+              <li>Move client IDs into a restricted folder.</li>
+              <li>Point everyone’s OneDrive sync app at the new library, then set the old folders to read-only for 90 days before removing them.</li>
+              <li>Leave personal folders in the personal OneDrive. Only the Clio, Archived Client Files and practice folders move.</li>
+            </ol>
+          </div>
         </div>
       </section>
     </div>
