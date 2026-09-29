@@ -8,7 +8,7 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 
 | Area | What it shows |
 |---|---|
-| Dashboard | The first screen after sign-in. Each person's own scorecard (metrics chosen for their role, with goals, pace against the quarter and a five-quarter trend). Leaders also see their organization — org chart, team totals, everyone against goal — and drill from the firm to a person, to a metric, to the matters behind it. Set up in Settings › Scorecards & goals |
+| Dashboard | The first screen after sign-in. Each person's own scorecard (metrics chosen for their role, with goals, pace against the quarter and a five-quarter trend). Leaders also see their organization — org chart, team totals, everyone against goal — and drill from the firm to a person, to a metric, to the matters behind it. Metrics include matters closed and response time to new prospects (hours from inquiry to first reply; tracked on each PNC matter). Set up in Settings › Scorecards & goals |
 | Today | One queue of everything dated: late milestones, suspense dates, contact follow-ups, deadlines |
 | PNC matters | One record per prospect from first call to hired, with a recorded conflict check; the system schedules every follow-up touch |
 | Contacts | Every person and organization stored once, attached to any number of PNC and Client matters with a role on each |

@@ -81,7 +81,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v10';
+const CONFIG_KEY = 'docket.config.v11';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -372,7 +372,7 @@ function useStoreValue() {
         setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
       },
       markTouch(id: string, key: string) {
-        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, touches: { ...p.touches, [key]: todayISO() } } : p)) }));
+        setS((x) => ({ ...x, pncs: x.pncs.map((p) => (p.id === id ? { ...p, touches: { ...p.touches, [key]: todayISO() }, firstReplyAt: p.firstReplyAt ?? (p.receivedAt ? new Date().toISOString() : undefined) } : p)) }));
       },
       /** New PNC matter. Pass an existing contact id, or new contact details to create one. */
       addPnc(p: Omit<Pnc, 'id' | 'touches' | 'parties' | 'notes' | 'conflicts'>, who: { contactId: string } | Omit<Contact, 'id' | 'notes'>, others: Party[] = []): string {
@@ -385,7 +385,7 @@ function useStoreValue() {
             contactId = newId('ct');
             contacts = [...contacts, { ...who, id: contactId, notes: [] }];
           }
-          const pnc: Pnc = { ...p, id, touches: {}, notes: [], conflicts: [], parties: [{ contactId, role: 'client', primary: true }, ...others] };
+          const pnc: Pnc = { receivedAt: new Date().toISOString(), ...p, id, touches: {}, notes: [], conflicts: [], parties: [{ contactId, role: 'client', primary: true }, ...others] };
           return { ...x, contacts, pncs: [pnc, ...x.pncs] };
         });
         return id;

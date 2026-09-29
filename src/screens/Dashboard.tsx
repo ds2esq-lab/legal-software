@@ -96,14 +96,15 @@ function trend(ctx: Ctx, id: string, people: string[]) {
   return ctx.quarters.map((qq) => ctx.scores.value(id, people, qq));
 }
 
-function Delta({ now, prev, unit, q }: { now?: number; prev?: number; unit: S.Unit; q: Quarter }) {
+function Delta({ now, prev, def, q }: { now?: number; prev?: number; def: S.MetricDef; q: Quarter }) {
   if (now === undefined || !prev) return null;
   // Compare the quarter so far with the same share of last quarter, so a partial quarter isn't a false drop.
-  const e = unit === 'pct' ? 1 : S.elapsed(q);
+  const e = S.isRate(def) ? 1 : S.elapsed(q);
   const base = prev * (e || 1);
-  const d = unit === 'pct' ? now - prev : ((now - base) / base) * 100;
+  const d = def.unit === 'pct' ? now - prev : ((now - base) / base) * 100;
   const up = d >= 0;
-  return <span className={`delta ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {Math.abs(Math.round(d))}{unit === 'pct' ? ' pts' : '%'}<span className="muted"> vs {e < 1 ? 'same point last qtr' : 'last qtr'}</span></span>;
+  const good = def.lowerIsBetter ? !up : up;
+  return <span className={`delta ${good ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {Math.abs(Math.round(d))}{def.unit === 'pct' ? ' pts' : '%'}<span className="muted"> vs {e < 1 ? 'same point last qtr' : 'last qtr'}</span></span>;
 }
 
 /** Rows behind a number: by practice area (chart) and by matter or person (table). */
@@ -157,7 +158,7 @@ function Detail({ ctx, id, people, onPerson, team }: { ctx: Ctx; id: string; peo
           </table>
         </div>
       )}
-      {byMatter.length === 0 && def.src === 'consult' && <p className="panel-body small muted">Consults are with prospects, so they're counted by practice area rather than by matter.</p>}
+      {byMatter.length === 0 && (def.src === 'consult' || def.src === 'reply') && <p className="panel-body small muted">{def.src === 'reply' ? 'Replies' : 'Consults'} are with prospects, so they're counted by practice area rather than by matter.{def.lowerIsBetter ? ' Slowest first.' : ''}</p>}
     </section>
   );
 }
@@ -170,7 +171,7 @@ function Tile({ ctx, id, u, on, onClick }: { ctx: Ctx; id: string; u: UserAccess
   const i = ctx.quarters.findIndex((x) => x.id === ctx.q.id);
   const v = vals[i];
   const goal = S.goalOf(u, id);
-  const t = S.toneFor(def.unit, v, goal, ctx.q);
+  const t = S.toneFor(def, v, goal, ctx.q);
   return (
     <button className={`tile tone-${t.tone} ${on ? 'on' : ''}`} onClick={onClick} aria-pressed={on}>
       <span className="spread"><span className="label">{def.label}</span>{t.tone !== 'none' && <span className={`dot tone-${t.tone}`} title={TONE_LABEL[t.tone]} />}</span>
@@ -184,7 +185,7 @@ function Tile({ ctx, id, u, on, onClick }: { ctx: Ctx; id: string; u: UserAccess
           {t.pace !== undefined && t.pace < 1 && <span className="bullet-pace" style={{ left: `${t.pace * 100}%` }} />}
         </span>
       ) : <span className="bullet" />}
-      <span className="small muted">{goal ? `Goal ${S.fmt(def.unit, goal)}` : 'No goal set'} · <Delta now={v} prev={vals[i - 1]} unit={def.unit} q={ctx.q} /></span>
+      <span className="small muted">{goal ? `Goal ${def.lowerIsBetter ? 'under ' : ''}${S.fmt(def.unit, goal)}` : 'No goal set'} · <Delta now={v} prev={vals[i - 1]} def={def} q={ctx.q} /></span>
     </button>
   );
 }
@@ -199,10 +200,11 @@ function PersonView({ ctx, uid }: { ctx: Ctx; uid: string }) {
   const def = head ? S.metric(head)! : undefined;
   const v = head ? ctx.scores.value(head, [uid], ctx.q) : undefined;
   const goal = head ? S.goalOf(u, head) : undefined;
-  const t = def ? S.toneFor(def.unit, v, goal, ctx.q) : { tone: 'none' as S.Tone };
-  const expected = goal && def && def.unit !== 'pct' ? goal * S.elapsed(ctx.q) : undefined;
+  const t = def ? S.toneFor(def, v, goal, ctx.q) : { tone: 'none' as S.Tone };
+  const expected = goal && def && !S.isRate(def) ? goal * S.elapsed(ctx.q) : undefined;
   const mine = s.tasks.filter((x) => x.assignee === uid && !x.done);
   const overdue = mine.filter((x) => new Date(x.due).getTime() < Date.now()).length;
+  const awaiting = s.pncs.filter((p) => p.owner === uid && p.receivedAt && !p.firstReplyAt && p.stage !== 'lost').length;
   const dueToday = mine.filter((x) => x.due.slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
 
   if (!def) return <p className="muted">No scorecard is set up for {teamName(uid)}. Pick metrics in Settings → Scorecards & goals.</p>;
@@ -212,7 +214,7 @@ function PersonView({ ctx, uid }: { ctx: Ctx; uid: string }) {
         <div className="dash-hero-ring">
           <Ring share={t.share} pace={t.pace} tone={t.tone}>
             <span className="num ring-v">{S.fmt(def.unit, v, true)}</span>
-            <span className="small muted">{goal ? `of ${S.fmt(def.unit, goal, true)}` : 'no goal'}</span>
+            <span className="small muted">{goal ? `${def.lowerIsBetter ? 'goal under' : 'of'} ${S.fmt(def.unit, goal, true)}` : 'no goal'}</span>
           </Ring>
           <div className="stack" style={{ gap: 4 }}>
             <span className="label">{def.label} · {ctx.q.label}</span>
@@ -233,6 +235,7 @@ function PersonView({ ctx, uid }: { ctx: Ctx; uid: string }) {
           <span className="label">Right now</span>
           <button className={`pill ${overdue ? 'tone-danger' : 'tone-ok'}`} onClick={() => go('tasks')}>{overdue} overdue task{overdue === 1 ? '' : 's'}</button>
           <button className="pill" onClick={() => go('tasks')}>{dueToday} due today</button>
+          {awaiting > 0 && <button className="pill tone-warn" onClick={() => go('intake')}>{awaiting} new prospect{awaiting === 1 ? '' : 's'} waiting for a first reply</button>}
           <button className="btn sm ghost" onClick={() => go('today')}>Open Today →</button>
         </div>
       )}
@@ -255,7 +258,7 @@ function OrgNode({ ctx, uid, visible, onOpen }: { ctx: Ctx; uid: string; visible
   const head = S.scorecardOf(u)[0];
   const def = head ? S.metric(head) : undefined;
   const v = head ? ctx.scores.value(head, [uid], ctx.q) : undefined;
-  const t = def ? S.toneFor(def.unit, v, S.goalOf(u, head), ctx.q) : { tone: 'none' as S.Tone, share: undefined, pace: undefined };
+  const t = def ? S.toneFor(def, v, S.goalOf(u, head), ctx.q) : { tone: 'none' as S.Tone, share: undefined, pace: undefined };
   const team = TEAM.find((x) => x.id === uid);
   const others = S.scorecardOf(u).slice(1, 3);
   return (
@@ -277,12 +280,13 @@ function OrgNode({ ctx, uid, visible, onOpen }: { ctx: Ctx; uid: string; visible
   );
 }
 
-const TEAM_METRICS = ['fees', 'hours', 'tasksDone', 'onTime', 'hires'];
+const TEAM_METRICS = ['fees', 'hours', 'tasksDone', 'onTime', 'hires', 'closed', 'response'];
+const OPTIONAL = ['fees', 'hires', 'closed', 'response']; // team tiles shown only when someone on the team is measured on them
 
 function TeamView({ ctx, people, title, onOpen, top }: { ctx: Ctx; people: string[]; title: string; onOpen: (p: string) => void; top: string[] }) {
   const [sel, setSel] = useState('fees');
   const i = ctx.quarters.findIndex((x) => x.id === ctx.q.id);
-  const metrics = TEAM_METRICS.filter((id) => people.some((p) => S.scorecardOf(ctx.users.find((u) => u.userId === p)!).includes(id) || (id !== 'fees' && id !== 'hires')));
+  const metrics = TEAM_METRICS.filter((id) => people.some((p) => S.scorecardOf(ctx.users.find((u) => u.userId === p)!).includes(id) || !OPTIONAL.includes(id)));
   const selected = metrics.includes(sel) ? sel : metrics[0];
   // Everyone's headline as a share of their own goal, so different jobs sit on one chart.
   const vsGoal = people.map((p) => {
@@ -291,7 +295,7 @@ function TeamView({ ctx, people, title, onOpen, top }: { ctx: Ctx; people: strin
     const def = head ? S.metric(head) : undefined;
     const v = head ? ctx.scores.value(head, [p], ctx.q) : undefined;
     const goal = head ? S.goalOf(u, head) : undefined;
-    return { p, def, v, goal, ...(def ? S.toneFor(def.unit, v, goal, ctx.q) : { tone: 'none' as S.Tone }) };
+    return { p, def, v, goal, ...(def ? S.toneFor(def, v, goal, ctx.q) : { tone: 'none' as S.Tone }) };
   });
   const pace = S.elapsed(ctx.q);
   return (
@@ -304,7 +308,7 @@ function TeamView({ ctx, people, title, onOpen, top }: { ctx: Ctx; people: strin
             <button key={id} className={`tile ${id === selected ? 'on' : ''}`} aria-pressed={id === selected} onClick={() => setSel(id)}>
               <span className="label">{title} · {def.label}</span>
               <span className="spread" style={{ alignItems: 'flex-end' }}><span className="num tile-v">{S.fmt(def.unit, vals[i])}</span><Spark values={vals} /></span>
-              <span className="small muted"><Delta now={vals[i]} prev={vals[i - 1]} unit={def.unit} q={ctx.q} /></span>
+              <span className="small muted"><Delta now={vals[i]} prev={vals[i - 1]} def={def} q={ctx.q} /></span>
             </button>
           );
         })}
@@ -324,8 +328,8 @@ function TeamView({ ctx, people, title, onOpen, top }: { ctx: Ctx; people: strin
                   <span className="stack" style={{ gap: 0, minWidth: 0 }}><strong className="small">{r.p === 'me' ? 'You' : teamName(r.p)}</strong><span className="small muted">{r.def?.label ?? 'No scorecard'}</span></span>
                   <span className="bullet big">
                     <span className={`bullet-fill tone-${r.tone}`} style={{ width: `${Math.min(100, (r.share ?? 0) * 100)}%` }} />
-                    {r.def && r.def.unit !== 'pct' && pace < 1 && <span className="bullet-pace" style={{ left: `${pace * 100}%` }} />}
-                    {r.def?.unit === 'pct' && <span className="bullet-pace" style={{ left: '100%' }} />}
+                    {r.def && !S.isRate(r.def) && pace < 1 && <span className="bullet-pace" style={{ left: `${pace * 100}%` }} />}
+                    {r.def && S.isRate(r.def) && <span className="bullet-pace" style={{ left: '100%' }} />}
                   </span>
                   <span className="num small" style={{ textAlign: 'right' }}>{r.def ? S.fmt(r.def.unit, r.v, true) : '—'}<span className="muted">{r.goal ? ` / ${S.fmt(r.def!.unit, r.goal, true)}` : ''}</span></span>
                 </button>
@@ -348,8 +352,8 @@ export default function Dashboard() {
   const [qid, setQ] = useState(quarters[quarters.length - 1].id);
   const q = quarters.find((x) => x.id === qid)!;
   const scores = useMemo(
-    () => S.makeScores({ users: s.users, matters: s.matters, tasks: s.tasks, timeEntries: s.timeEntries, trustTxns: s.trustTxns, invoices: s.invoices, areaIds: s.areas.map((a) => a.id) }),
-    [s.users, s.matters, s.tasks, s.timeEntries, s.trustTxns, s.invoices, s.areas],
+    () => S.makeScores({ users: s.users, matters: s.matters, tasks: s.tasks, timeEntries: s.timeEntries, trustTxns: s.trustTxns, invoices: s.invoices, pncs: s.pncs, areaIds: s.areas.map((a) => a.id) }),
+    [s.users, s.matters, s.tasks, s.timeEntries, s.trustTxns, s.invoices, s.pncs, s.areas],
   );
   const ctx: Ctx = { scores, quarters, q, setQ, users: s.users };
 

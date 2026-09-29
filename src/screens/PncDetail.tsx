@@ -7,6 +7,9 @@ import { DuePill, fmtDate, PageHead } from '../ui';
 import { ConflictBadge, ConflictPanel } from '../conflictPanel';
 import { HireForm } from './Intake';
 import { NewTaskForm, TaskRow } from './Tasks';
+import { responseHours } from '../scorecard';
+
+const fmtHours = (h: number) => (h < 48 ? `${h < 10 ? Math.round(h * 10) / 10 : Math.round(h)} h` : `${Math.round(h / 24)} days`);
 
 export default function PncDetail() {
   const { s, pncId, lookup, actions, go, notify } = useStore();
@@ -28,6 +31,21 @@ export default function PncDetail() {
           <button className="btn primary" disabled={p.conflicts[0]?.result === 'conflict'} onClick={() => setHiring(true)}>Hired → open Client matter</button>
         )}
       </PageHead>
+
+      {p.receivedAt && (
+        <div className="row small" style={{ gap: 8 }}>
+          <span className="label">First reply</span>
+          {p.firstReplyAt ? (
+            <span className={`pill ${responseHours(p.receivedAt, p.firstReplyAt) <= 4 ? 'tone-ok' : 'tone-warn'}`}>{fmtHours(responseHours(p.receivedAt, p.firstReplyAt))} after the inquiry came in</span>
+          ) : (
+            <>
+              <span className="pill tone-warn">Waiting {fmtHours(responseHours(p.receivedAt, new Date().toISOString()))}</span>
+              <button className="btn sm" onClick={() => up({ firstReplyAt: new Date().toISOString() })}>Mark first reply sent</button>
+              <span className="muted">Logging a follow-up touch also counts.</span>
+            </>
+          )}
+        </div>
+      )}
 
       {hiring && !p.matterId && (
         <section className="panel panel-body" style={{ maxWidth: 420 }}>

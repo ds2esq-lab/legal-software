@@ -6,21 +6,22 @@
 //   - live data in the app (tasks completed, time entries, milestones, trust deposits and invoices)
 //   - generated history for earlier quarters, standing in for what an import from Monday and Clio
 //     would provide. It is fictional and seeded, so it's the same on every load.
-import type { Matter, UserAccess, Task, TimeEntry, Invoice } from './data';
+import type { Matter, UserAccess, Task, TimeEntry, Invoice, Pnc } from './data';
 import type { TrustTxn } from './trust';
 import { statsFor, type Quarter } from './metrics';
 import { addDays, todayISO } from './practice';
 
 export type Unit = 'money' | 'count' | 'hours' | 'pct';
-type Src = 'fees' | 'firmIn' | 'task' | 'hours' | 'milestone' | 'consult' | 'hire' | 'invoice';
+type Src = 'fees' | 'firmIn' | 'task' | 'hours' | 'milestone' | 'consult' | 'hire' | 'invoice' | 'closed' | 'reply';
 
 export interface MetricDef {
   id: string;
   label: string;
   unit: Unit;
   src: Src;
-  field: 'n' | 'dn' | 'ratio'; // what to add up: n, dn, or n ÷ dn as a percentage
+  field: 'n' | 'dn' | 'ratio' | 'avg'; // what to add up: n, dn, n ÷ dn as a percentage, or n ÷ dn as an average
   help: string;
+  lowerIsBetter?: boolean; // response time: the goal is a ceiling
   needsMeasure?: boolean; // fees: only for people with "Measured on" set
 }
 
@@ -34,15 +35,17 @@ export const METRICS: MetricDef[] = [
   { id: 'milestones', label: 'Milestones reached', unit: 'count', src: 'milestone', field: 'n', help: 'Matter milestones completed' },
   { id: 'consults', label: 'Consults held', unit: 'count', src: 'consult', field: 'n', help: 'Initial consultations with prospects' },
   { id: 'hires', label: 'New clients', unit: 'count', src: 'hire', field: 'n', help: 'PNC matters that hired the firm' },
+  { id: 'closed', label: 'Matters closed', unit: 'count', src: 'closed', field: 'n', help: 'Matters completed and closed out, credited to the responsible attorney' },
+  { id: 'response', label: 'Response time', unit: 'hours', src: 'reply', field: 'avg', lowerIsBetter: true, help: 'Average hours from a new prospect’s inquiry to the firm’s first reply (self-booked prospects aren’t counted)' },
   { id: 'invoicesSent', label: 'Invoices sent', unit: 'count', src: 'invoice', field: 'n', help: 'Invoices issued to clients' },
 ];
 export const metric = (id: string) => METRICS.find((m) => m.id === id);
 
 export const ROLE_SCORECARD: Record<string, string[]> = {
   managing: ['fees', 'hires', 'hours', 'onTime'],
-  attorney: ['fees', 'hours', 'onTime'],
-  paralegal: ['tasksDone', 'onTime', 'milestones'],
-  intake: ['consults', 'hires', 'onTime'],
+  attorney: ['fees', 'hours', 'onTime', 'closed'],
+  paralegal: ['tasksDone', 'onTime', 'milestones', 'closed'],
+  intake: ['response', 'consults', 'hires', 'onTime'],
   bookkeeper: ['firmIn', 'invoicesSent', 'onTime'],
 };
 
@@ -93,15 +96,15 @@ function rng(seed: string) {
 }
 
 // Typical quarter for each sample person (fictional).
-const RATES: Record<string, Partial<Record<'tasks' | 'onTime' | 'hours' | 'billable' | 'milestones' | 'consults' | 'hires' | 'invoices', number>>> = {
-  me: { tasks: 95, onTime: 0.9, hours: 310, billable: 0.78, milestones: 30, consults: 34, hires: 15 },
-  marcus: { tasks: 120, onTime: 0.86, hours: 305, billable: 0.84, milestones: 44, consults: 20, hires: 9 },
-  dana: { tasks: 250, onTime: 0.93, hours: 400, billable: 0.52, milestones: 60, consults: 42, hires: 16 },
-  priya: { tasks: 170, onTime: 0.82, hours: 360, billable: 0.6, milestones: 36 },
+const RATES: Record<string, Partial<Record<'tasks' | 'onTime' | 'hours' | 'billable' | 'milestones' | 'consults' | 'hires' | 'invoices' | 'closed' | 'prospects' | 'replyH', number>>> = {
+  me: { tasks: 95, onTime: 0.9, hours: 310, billable: 0.78, milestones: 30, consults: 34, hires: 15, closed: 13, prospects: 30, replyH: 7 },
+  marcus: { tasks: 120, onTime: 0.86, hours: 305, billable: 0.84, milestones: 44, consults: 20, hires: 9, closed: 11, prospects: 18, replyH: 14 },
+  dana: { tasks: 250, onTime: 0.93, hours: 400, billable: 0.52, milestones: 60, consults: 42, hires: 16, prospects: 75, replyH: 3 },
+  priya: { tasks: 170, onTime: 0.82, hours: 360, billable: 0.6, milestones: 36, closed: 9 },
   lena: { tasks: 70, onTime: 0.96, hours: 420, billable: 0.08, invoices: 58 },
 };
 const ROLE_RATES: Record<string, (typeof RATES)[string]> = {
-  managing: RATES.me, attorney: RATES.marcus, paralegal: RATES.priya, intake: { tasks: 120, onTime: 0.9, hours: 420, billable: 0.1, consults: 45, hires: 16 }, bookkeeper: RATES.lena,
+  managing: RATES.me, attorney: RATES.marcus, paralegal: RATES.priya, intake: { tasks: 120, onTime: 0.9, hours: 420, billable: 0.1, consults: 45, hires: 16, prospects: 80, replyH: 3 }, bookkeeper: RATES.lena,
 };
 
 /** Generated history for one person and quarter (up to yesterday). */
@@ -140,6 +143,10 @@ function history(u: UserAccess, q: Quarter, matters: Matter[], areaIds: string[]
   for (let i = 0; i < count(rate.consults); i++) add('consult', 1, 1, false);
   for (let i = 0; i < count(rate.hires); i++) add('hire', 1, 1);
   for (let i = 0; i < count(rate.invoices); i++) add('invoice', 1, 1);
+  for (let i = 0; i < count(rate.closed); i++) add('closed', 1, 1);
+  // Reply times are skewed: most within a few hours, a few after a weekend. Drifts a little each quarter.
+  const typical = (rate.replyH ?? 6) * (0.8 + r() * 0.4);
+  for (let i = 0; i < count(rate.prospects); i++) add('reply', Math.round(-Math.log(1 - r() * 0.98) * typical * 10) / 10, 1, false);
   return out;
 }
 
@@ -150,6 +157,7 @@ export interface Sources {
   timeEntries: TimeEntry[];
   trustTxns: TrustTxn[];
   invoices: Invoice[];
+  pncs: Pnc[];
   areaIds: string[];
 }
 
@@ -169,6 +177,8 @@ export function makeScores(src: Sources) {
     const out = history(u, q, src.matters, src.areaIds);
     for (const t of src.tasks) if (t.assignee === uid && t.done && inQ(t.doneAt, q)) out.push({ u: uid, d: t.doneAt!.slice(0, 10), src: 'task', m: t.matterId, a: t.matterId ? matterById.get(t.matterId)?.areaId : undefined, n: t.doneAt! <= t.due ? 1 : 0, dn: 1 });
     for (const e of src.timeEntries) if (e.user === uid && inQ(e.date, q)) { const h = e.actualMinutes / 60; out.push({ u: uid, d: e.date, src: 'hours', m: e.matterId, a: matterById.get(e.matterId)?.areaId, n: e.billable ? h : 0, dn: h }); }
+    for (const m of src.matters) if (m.owner === uid && m.status === 'closed' && inQ(m.closedOn, q)) out.push({ u: uid, d: m.closedOn!, src: 'closed', m: m.id, a: m.areaId, n: 1, dn: 1 });
+    for (const p of src.pncs) if (p.owner === uid && p.receivedAt && p.firstReplyAt && inQ(p.firstReplyAt, q)) out.push({ u: uid, d: p.firstReplyAt.slice(0, 10), src: 'reply', a: p.areaId, n: responseHours(p.receivedAt, p.firstReplyAt), dn: 1 });
     for (const m of src.matters) if (m.owner === uid) for (const ms of Object.values(m.milestones)) if (inQ(ms.done, q)) out.push({ u: uid, d: ms.done!, src: 'milestone', m: m.id, a: m.areaId, n: 1, dn: 1 });
     if (u.measure) {
       const st = statsFor(uid, q, src.matters, src.trustTxns, src.invoices);
@@ -191,9 +201,9 @@ export function makeScores(src: Sources) {
   const pick = (def: MetricDef, people: string[], q: Quarter) => people.flatMap((p) => events(p, q)).filter((e) => e.src === def.src);
 
   function total(evs: Ev[], def: MetricDef): number | undefined {
-    if (def.field === 'ratio') {
+    if (def.field === 'ratio' || def.field === 'avg') {
       const dn = evs.reduce((s, e) => s + e.dn, 0);
-      return dn ? (evs.reduce((s, e) => s + e.n, 0) / dn) * 100 : undefined;
+      return dn ? (evs.reduce((s, e) => s + e.n, 0) / dn) * (def.field === 'ratio' ? 100 : 1) : undefined;
     }
     return evs.reduce((s, e) => s + e[def.field as 'n' | 'dn'], 0);
   }
@@ -233,13 +243,25 @@ export function elapsed(q: Quarter, today = todayISO()) {
 export type Tone = 'ok' | 'warn' | 'danger' | 'none';
 
 /** Compares a value with its goal. Sums are judged against where they should be by now; rates against the goal itself. */
-export function toneFor(unit: Unit, value: number | undefined, goal: number | undefined, q: Quarter): { tone: Tone; pace?: number; share?: number } {
+export function toneFor(def: MetricDef, value: number | undefined, goal: number | undefined, q: Quarter): { tone: Tone; pace?: number; share?: number } {
   if (value === undefined || !goal) return { tone: 'none' };
-  const pace = unit === 'pct' ? 1 : elapsed(q);
+  if (def.lowerIsBetter) {
+    // A ceiling: at or under the goal is on target. The bar fills as the number gets better.
+    const share = value <= goal ? 1 : goal / value;
+    return { tone: value <= goal ? 'ok' : value <= goal * 1.25 ? 'warn' : 'danger', pace: 1, share };
+  }
+  const unit = def.unit;
+  const pace = isRate(def) ? 1 : elapsed(q);
   const share = value / goal;
   const ratio = pace ? share / pace : 1;
   return { tone: ratio >= 1 ? 'ok' : ratio >= (unit === 'pct' ? 0.95 : 0.85) ? 'warn' : 'danger', pace, share };
 }
+
+/** Rates and averages aren't expected to grow through the quarter, so they aren't judged against pace. */
+export const isRate = (def: MetricDef) => def.field === 'ratio' || def.field === 'avg';
+
+/** Hours from inquiry to first reply. Counted around the clock; business hours could come later. */
+export const responseHours = (from: string, to: string) => Math.max(0, Math.round(((new Date(to).getTime() - new Date(from).getTime()) / 3600000) * 10) / 10);
 
 export function fmt(unit: Unit, v: number | undefined, short = false) {
   if (v === undefined) return '—';
@@ -248,6 +270,6 @@ export function fmt(unit: Unit, v: number | undefined, short = false) {
     return `$${Math.round(v).toLocaleString('en-US')}`;
   }
   if (unit === 'pct') return `${Math.round(v)}%`;
-  if (unit === 'hours') return `${Math.round(v).toLocaleString('en-US')}${short ? 'h' : ' h'}`;
+  if (unit === 'hours') return `${(v < 10 ? Math.round(v * 10) / 10 : Math.round(v)).toLocaleString('en-US')}${short ? 'h' : ' h'}`;
   return Math.round(v).toLocaleString('en-US');
 }

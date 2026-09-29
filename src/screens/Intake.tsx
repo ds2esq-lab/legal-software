@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { PNC_STAGES, TEAM, type Pnc, type PncStage } from '../data';
 import { searchConflicts, summarize } from '../conflicts';
 import { ConflictBadge } from '../conflictPanel';
+import { responseHours } from '../scorecard';
 import { nextTouch, touchesFor } from '../intake';
 import { addDays, newId, todayISO } from '../practice';
 import { DuePill, fmtDate, fmtTime, PageHead, Person, relDay } from '../ui';
@@ -63,6 +64,7 @@ function PncCard({ p }: { p: Pnc }) {
         <Person id={p.owner} />
       </div>
       <div className="small muted">{p.title}</div>
+      {p.receivedAt && !p.firstReplyAt && <span className="pill tone-danger small" style={{ alignSelf: 'flex-start' }}>No reply yet · {Math.round(responseHours(p.receivedAt, new Date().toISOString()))} h</span>}
       <div className="row" style={{ gap: 4 }}><ConflictPill p={p} />{p.parties.length > 1 && <span className="small muted">+{p.parties.length - 1} people</span>}</div>
       {p.consultAt && (p.stage === 'scheduled' || p.stage === 'notes') && (
         <div className="small">Consult {relDay(p.consultAt)} {fmtTime(p.consultAt)}</div>
