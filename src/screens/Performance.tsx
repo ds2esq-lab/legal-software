@@ -8,7 +8,7 @@ import { PageHead } from '../ui';
 type Measure = 'fixed' | 'hourly' | 'both';
 const headline = (s: Stats, m: Measure) => (m === 'hourly' ? s.collected : m === 'fixed' ? s.paid : s.paid + s.collected);
 const headlineLabel = (m: Measure) => (m === 'hourly' ? 'Collected' : m === 'fixed' ? 'Fees brought in (paid)' : 'Brought in + collected');
-const k = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : money(n));
+const k = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `$${Math.round(n)}`);
 
 /** Five-quarter trend of the headline number. One series, so one hue and no legend. */
 function Trend({ values, quarters, selected, onPick }: { values: number[]; quarters: Quarter[]; selected: string; onPick: (id: string) => void }) {
