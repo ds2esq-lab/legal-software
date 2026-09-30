@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useStore, type Screen } from './store';
+import { unreadFor, useStore, type Screen } from './store';
 import { formatClock } from './billing';
 import { TEAM, teamName, type Perm } from './data';
 import Today from './screens/Today';
@@ -125,6 +125,7 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
 export default function App() {
   const { screen, go, s, toast, access, actions } = useStore();
   const trustPending = s.trustTxns.filter((t) => t.status === 'pending').length;
+  const unread = unreadFor(s.messages, access.user).length;
   const overdue = s.tasks.filter((r) => !r.done && r.assignee === access.user && new Date(r.due).getTime() < Date.now()).length;
 
   const view = {
@@ -163,6 +164,7 @@ export default function App() {
                 <span>{n.label}</span>
                 {n.id === 'tasks' && overdue > 0 && <span className="count">{overdue}</span>}
                 {n.id === 'trust' && trustPending > 0 && <span className="count">{trustPending}</span>}
+                {n.id === 'messages' && unread > 0 && <span className="count" title="Unread client portal messages">{unread}</span>}
               </button>
             </div>
           ))}

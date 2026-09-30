@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from '../store';
+import { useStore, unreadFor } from '../store';
 import { TEAM, type Matter } from '../data';
 import { billedMinutes, formatHours, money } from '../billing';
 import { entryValue, hourlyRate, nextActions } from '../calc';
@@ -522,6 +522,7 @@ export default function MatterDetail() {
             {t === 'trust' && T.balanceOf(m.id, s.trustTxns) > 0 && <span className="num muted"> {money(T.balanceOf(m.id, s.trustTxns))}</span>}
             {t === 'tasks' && openTasks.length > 0 && <span className="num muted"> {openTasks.length}</span>}
             {t === 'notes' && m.notes.length > 0 && <span className="num muted"> {m.notes.length}</span>}
+            {t === 'messages' && unreadFor(s.messages, access.user).some((x) => x.channel === m.id) && <span className="count">{unreadFor(s.messages, access.user).filter((x) => x.channel === m.id).length} new</span>}
             {t === 'conflicts' && (m.conflicts.length === 0 || uncheckedParties(m.conflicts, m.parties).length > 0) && <span className="dot-warn" aria-label="needs attention" />}
           </button>
         ))}

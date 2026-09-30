@@ -124,3 +124,22 @@ export function businessHours(from: string, to: string, h: OfficeHours = current
 
 /** Length of one open day, in hours. */
 export const dayLength = (h: OfficeHours = current) => Math.max(0, (minutes(h.close) - minutes(h.open)) / 60);
+
+/** The moment that's `hours` of open time after `from` (e.g. a reply due "within 4 business hours"). */
+export function addBusinessHours(from: string, hours: number, h: OfficeHours = current) {
+  let left = hours * 60; // minutes
+  const t = new Date(from);
+  for (let guard = 0; guard < 3660; guard++) {
+    const day = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    const open = new Date(day.getTime() + minutes(h.open) * 60000);
+    const close = new Date(day.getTime() + minutes(h.close) * 60000);
+    if (isOpenDay(localISO(day), h) && t < close) {
+      const start = t < open ? open : t;
+      const avail = (close.getTime() - start.getTime()) / 60000;
+      if (avail >= left) return new Date(start.getTime() + left * 60000).toISOString();
+      left -= avail;
+    }
+    t.setTime(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime());
+  }
+  return t.toISOString();
+}

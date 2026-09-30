@@ -186,7 +186,7 @@ export interface Task {
   snoozes: number;
   log: string[];
   checklist: ChecklistItem[];
-  source: 'manual' | 'stage';
+  source: 'manual' | 'stage' | 'portal';
   createdAt: string;
   comments?: Note[];
 }
@@ -211,6 +211,8 @@ export interface Message {
   text: string;
   at: string;
   clientVisible: boolean;
+  to?: string[]; // client messages: who was alerted
+  readBy?: string[]; // client messages: who has opened it
 }
 
 export interface CallLog {
@@ -695,6 +697,7 @@ const tk = (t: Omit<Task, 'snoozes' | 'log' | 'checklist' | 'source' | 'createdA
 const cl = (...items: [string, boolean][]) => items.map(([text, done]) => ({ text, done }));
 
 export const tasks: Task[] = [
+  tk({ id: 'r-pm1', title: 'Reply to portal message', matterId: 'm4', due: at(0, 10, 10), assignee: 'me', escalateTo: 'dana', kind: 'client', source: 'portal', createdAt: at(-1, 15, 10), log: ['Created when the client wrote in the portal'] }),
   tk({ id: 'r1', title: 'File petition response', matterId: 'm14', due: at(0, 17), assignee: 'me', escalateTo: 'marcus', kind: 'court', status: 'doing', snoozes: 1, log: ['Nudged 7 days out', 'Nudged 3 days out', 'Snoozed 2h yesterday'] }),
   tk({ id: 'r2', title: 'Creditor claim period ends', matterId: 'm8', due: at(38, 17), assignee: 'priya', escalateTo: 'me', kind: 'court' }),
   tk({ id: 'r3', title: 'Mail recorded deed to client', matterId: 'm19', due: at(2, 12), assignee: 'dana', kind: 'client', source: 'stage' }),
@@ -726,6 +729,7 @@ export const messages: Message[] = [
   { id: 'i1', channel: 'intake', author: 'dana', text: 'New probate inquiry flagged a possible conflict (adverse party is a current client). Needs your review.', at: at(-1, 9, 40), clientVisible: false },
   { id: 'm1a', channel: 'm1', author: 'client', text: 'We got the drafts. Can we change the successor trustee order?', at: at(-1, 11, 2), clientVisible: true },
   { id: 'm1b', channel: 'm1', author: 'me', text: 'Yes, easy change. We’ll walk through it on the review call.', at: at(-1, 11, 30), clientVisible: true },
+  { id: 'm4a', channel: 'm4', author: 'client', text: 'Quick question before the signing: can my sister be there as a witness?', at: at(-1, 15, 10), clientVisible: true, to: ['me', 'dana'], readBy: [] },
   { id: 'm1c', channel: 'm1', author: 'marcus', text: 'Trustee order change noted in the revision list.', at: at(-1, 16, 20), clientVisible: false },
 ];
 

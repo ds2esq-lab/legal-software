@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useStore } from '../store';
+import { unreadFor, useStore } from '../store';
 import { TEAM, teamName, type UserAccess } from '../data';
 import { recentQuarters, type Quarter } from '../metrics';
 import * as S from '../scorecard';
@@ -205,6 +205,7 @@ function PersonView({ ctx, uid }: { ctx: Ctx; uid: string }) {
   const mine = s.tasks.filter((x) => x.assignee === uid && !x.done);
   const overdue = mine.filter((x) => new Date(x.due).getTime() < Date.now()).length;
   const awaiting = s.pncs.filter((p) => p.owner === uid && p.receivedAt && !p.firstReplyAt && p.stage !== 'lost').length;
+  const unreadMsgs = unreadFor(s.messages, uid).length;
   const dueToday = mine.filter((x) => x.due.slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
 
   if (!def) return <p className="muted">No scorecard is set up for {teamName(uid)}. Pick metrics in Settings → Scorecards & goals.</p>;
@@ -235,6 +236,7 @@ function PersonView({ ctx, uid }: { ctx: Ctx; uid: string }) {
           <span className="label">Right now</span>
           <button className={`pill ${overdue ? 'tone-danger' : 'tone-ok'}`} onClick={() => go('tasks')}>{overdue} overdue task{overdue === 1 ? '' : 's'}</button>
           <button className="pill" onClick={() => go('tasks')}>{dueToday} due today</button>
+          {unreadMsgs > 0 && <button className="pill tone-danger" onClick={() => go('messages')}>{unreadMsgs} unread client message{unreadMsgs === 1 ? '' : 's'}</button>}
           {awaiting > 0 && <button className="pill tone-warn" onClick={() => go('intake')}>{awaiting} new prospect{awaiting === 1 ? '' : 's'} waiting for a first reply</button>}
           <button className="btn sm ghost" onClick={() => go('today')}>Open Today →</button>
         </div>

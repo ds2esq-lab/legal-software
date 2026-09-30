@@ -7,9 +7,10 @@ import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data'
 import * as T from '../trust';
 import * as SC from '../scorecard';
 import * as OH from '../officeHours';
+import { clientFacingName } from '../notify';
 import { PageHead } from '../ui';
 
-type Section = 'users' | 'scorecards' | 'hours' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'scorecards' | 'hours' | 'notify' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -484,6 +485,95 @@ function DocsEditor() {
   );
 }
 
+function NotifyEditor() {
+  const { s, actions, lookup } = useStore();
+  const n = s.notify;
+  const set = (p: Partial<typeof n>) => actions.setNotify({ ...n, ...p });
+  const name = (id: string) => (id === 'me' ? 'You' : TEAM.find((t) => t.id === id)?.name ?? id);
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <section className="panel">
+        <div className="panel-head"><h2>How the firm appears to clients</h2><span className="small muted">Signs replies in the client portal</span></div>
+        <div className="panel-body row" style={{ gap: 12, alignItems: 'flex-end' }}>
+          <div className="field"><label htmlFor="nt-firm">Firm name</label><input className="input" id="nt-firm" value={n.firmName} onChange={(e) => set({ firmName: e.target.value })} /></div>
+          <div className="field"><label htmlFor="nt-me">Your name (the app calls you “You”)</label><input className="input" id="nt-me" value={n.myName} onChange={(e) => set({ myName: e.target.value })} /></div>
+          <div className="field">
+            <span className="label">Replies are signed</span>
+            <div className="seg" role="group" aria-label="Replies are signed">
+              <button aria-pressed={n.sender === 'person'} onClick={() => set({ sender: 'person' })}>By the person who wrote</button>
+              <button aria-pressed={n.sender === 'firm'} onClick={() => set({ sender: 'firm' })}>As the firm</button>
+            </div>
+          </div>
+          <span className="small muted" style={{ paddingBottom: 6 }}>Example: <strong>{clientFacingName('dana', n)}</strong></span>
+        </div>
+      </section>
+      <div className="grid cols-2">
+        <section className="panel">
+          <div className="panel-head"><h2>When a client writes in the portal</h2></div>
+          <div className="panel-body stack" style={{ gap: 12 }}>
+            <div className="stack" style={{ gap: 4 }}>
+              <span className="label">Who is alerted</span>
+              <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked disabled /> The matter’s responsible attorney, always</label>
+              {s.users.map((u) => (
+                <label key={u.userId} className="row small" style={{ gap: 6 }}>
+                  <input type="checkbox" id={`nt-also-${u.userId}`} checked={n.also.includes(u.userId)} onChange={(e) => set({ also: e.target.checked ? [...n.also, u.userId] : n.also.filter((x) => x !== u.userId) })} />
+                  {name(u.userId)} <span className="muted">· {TEAM.find((t) => t.id === u.userId)?.role}</span>
+                </label>
+              ))}
+              <span className="small muted">Nobody is alerted about a matter they can’t open: practice-area limits and ethical walls apply.</span>
+            </div>
+            <label className="small" style={{ lineHeight: 2.2 }}>
+              <input type="checkbox" id="nt-task" checked={n.replyTask} onChange={(e) => set({ replyTask: e.target.checked })} style={{ marginRight: 6 }} />
+              Create a “Reply to portal message” task for the responsible attorney, due within
+              <input className="input small tight num" style={{ width: 56, display: 'inline-block', margin: '0 6px' }} type="number" min={1} max={40} id="nt-within" aria-label="Business hours to reply" value={n.replyWithin} onChange={(e) => set({ replyWithin: Math.max(1, Number(e.target.value) || 1) })} />
+              business hours
+            </label>
+            <p className="small muted" style={{ margin: 0 }}>
+              The task follows the usual reminder rules: nudges, and escalation to the first other person alerted after three snoozes. Replying to the client in the matter thread marks the messages read, completes the task and hands Whose Ball back to the client. A new message puts the ball with the responsible attorney.
+            </p>
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-head"><h2>How each person hears</h2><span className="small muted">In the app always: badge on Messages and the matter, and on their dashboard</span></div>
+          <div className="table-wrap">
+            <table className="t">
+              <thead><tr><th>Person</th><th>Email</th><th>Text</th></tr></thead>
+              <tbody>
+                {s.users.map((u) => {
+                  const c = n.channels[u.userId] ?? { email: false, text: false };
+                  const setC = (p: Partial<typeof c>) => set({ channels: { ...n.channels, [u.userId]: { ...c, ...p } } });
+                  return (
+                    <tr key={u.userId}>
+                      <td>{name(u.userId)}</td>
+                      <td><input type="checkbox" id={`nt-email-${u.userId}`} aria-label={`Email ${name(u.userId)}`} checked={c.email} onChange={(e) => setC({ email: e.target.checked })} /></td>
+                      <td><input type="checkbox" id={`nt-text-${u.userId}`} aria-label={`Text ${name(u.userId)}`} checked={c.text} onChange={(e) => setC({ text: e.target.checked })} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="panel-body small muted" style={{ margin: 0 }}>
+            Emails and texts never include the message or the client’s name, only the matter number and a link to sign in. A phone screen or a shared inbox shouldn’t reveal client confidences.
+          </p>
+        </section>
+      </div>
+      <section className="panel">
+        <div className="panel-head"><h2>Alerts sent</h2><span className="pill info">Simulated: nothing leaves the prototype</span></div>
+        <ul className="list">
+          {s.alerts.slice(0, 12).map((a) => (
+            <li key={a.id} className="spread">
+              <span className="small"><span className="pill">{a.via === 'app' ? 'In app' : a.via === 'email' ? 'Email' : 'Text'}</span> <strong>{name(a.to)}</strong> · “{a.text}”</span>
+              <span className="small muted">{lookup.matter(a.matterId)?.number} · {new Date(a.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+            </li>
+          ))}
+          {s.alerts.length === 0 && <li className="small muted">None yet. Send a message from the Client portal screen to see what goes out.</li>}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function OfficeHoursEditor() {
@@ -722,7 +812,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['users', 'Users & permissions'], ['scorecards', 'Scorecards & goals'], ['hours', 'Office hours'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' || k === 'scorecards' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['scorecards', 'Scorecards & goals'], ['hours', 'Office hours'], ['notify', 'Notifications'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' || k === 'scorecards' || k === 'notify' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -752,6 +842,7 @@ export default function Settings() {
       {section === 'users' && access.can('users') && <UsersEditor />}
       {section === 'scorecards' && access.can('users') && <ScorecardEditor />}
       {section === 'hours' && <OfficeHoursEditor />}
+      {section === 'notify' && access.can('users') && <NotifyEditor />}
       {section === 'numbering' && <NumberingEditor />}
       {section === 'documents' && <DocsEditor />}
       {section === 'trust' && (

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { teamInitials, teamName } from './data';
 import { fmtTime, relDay } from './ui';
@@ -9,6 +9,12 @@ import { fmtTime, relDay } from './ui';
  */
 export default function Thread({ channel, allowClient, clientName }: { channel: string; allowClient: boolean; clientName?: string }) {
   const { s, actions } = useStore();
+  // Client messages that were unread when the thread opened stay marked "New" while it's open.
+  const [fresh] = useState(() => new Set(s.messages.filter((m) => m.channel === channel && m.author === 'client' && m.to?.includes(s.viewAs) && !m.readBy?.includes(s.viewAs)).map((m) => m.id)));
+  const count = s.messages.length;
+  useEffect(() => {
+    if (allowClient) actions.markRead(channel);
+  }, [channel, allowClient, count, s.viewAs, actions]);
   const [mode, setMode] = useState<'internal' | 'client' | 'all'>(allowClient ? 'all' : 'internal');
   const [text, setText] = useState('');
   const msgs = s.messages
@@ -45,6 +51,7 @@ export default function Thread({ channel, allowClient, clientName }: { channel: 
               <div style={{ minWidth: 0 }}>
                 <div className="row" style={{ gap: 6 }}>
                   <strong>{who}</strong>
+                  {fresh.has(m.id) && <span className="pill tone-danger">New</span>}
                   <span className="small muted">{relDay(m.at)} {fmtTime(m.at)}</span>
                   {allowClient && (m.clientVisible ? <span className="pill info">Client can see</span> : <span className="pill">Team only</span>)}
                 </div>

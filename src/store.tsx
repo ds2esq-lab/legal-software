@@ -5,7 +5,8 @@ import * as trust from './trust';
 import * as sched from './sched';
 import * as docs from './docs';
 import type { DocFile, DocSettings } from './docs';
-import { DEFAULT_OFFICE_HOURS, setFirmCalendar, type OfficeHours } from './officeHours';
+import { addBusinessHours, DEFAULT_OFFICE_HOURS, setFirmCalendar, type OfficeHours } from './officeHours';
+import { alertText, DEFAULT_NOTIFY, type Alert, type NotifySettings } from './notify';
 import type { Booking, MeetingType, RoutingForm, Schedule } from './sched';
 import type { BankTxn, Expense, Reconciliation, Replenishment, TrustTxn } from './trust';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
@@ -67,6 +68,8 @@ interface State {
   bookings: Booking[];
   docSettings: DocSettings;
   officeHours: OfficeHours;
+  notify: NotifySettings;
+  alerts: Alert[];
   docFiles: DocFile[];
   docFolders: Record<string, string[]>; // extra folders added per matter
   timeEntries: TimeEntry[];
@@ -84,7 +87,7 @@ interface State {
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
 const CONFIG_KEY = 'docket.config.v11';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings' | 'officeHours'>> {
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings' | 'officeHours' | 'notify'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -93,12 +96,26 @@ function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'r
   }
 }
 
+/** Could this person open the matter? Same rules as `access.canSee`, for anyone (used to route alerts). */
+function userCanSee(x: State, userId: string, m: Matter) {
+  const u = x.users.find((uu) => uu.userId === userId);
+  const role = x.permRoles.find((r) => r.id === u?.roleId);
+  if (!u || !role) return false;
+  if (m.restrictedTo?.length && !m.restrictedTo.includes(userId)) return false;
+  return role.perms.matters ? u.areas === 'all' || u.areas.includes(m.areaId) : role.perms.billingView;
+}
+
+/** Client portal messages this person was alerted to and hasn't opened yet. */
+export const unreadFor = (messages: Message[], userId: string) => messages.filter((m) => m.author === 'client' && m.to?.includes(userId) && !m.readBy?.includes(userId));
+
 function initialState(): State {
   const cfg = loadConfig();
   const officeHours = { ...DEFAULT_OFFICE_HOURS, ...cfg.officeHours };
   setFirmCalendar(officeHours);
   return {
     officeHours,
+    notify: { ...DEFAULT_NOTIFY, ...cfg.notify },
+    alerts: [],
     areas: (cfg.areas ?? DEFAULT_AREAS).map((a) => ({ ...a, stageTasks: a.stageTasks ?? [], feeSchedule: a.feeSchedule ?? [] })),
     cadences: cfg.cadences ?? seed.DEFAULT_CADENCES,
     billing: cfg.billing ?? DEFAULT_BILLING,
@@ -208,11 +225,11 @@ function useStoreValue() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing, docSettings: s.docSettings, officeHours: s.officeHours }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing, docSettings: s.docSettings, officeHours: s.officeHours, notify: s.notify }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing, s.docSettings, s.officeHours]);
+  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing, s.docSettings, s.officeHours, s.notify]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -717,11 +734,60 @@ function useStoreValue() {
       },
 
       // ----- Messages -----
-      postMessage(channel: string, text: string, clientVisible: boolean, author = 'me') {
-        setS((x) => ({
-          ...x,
-          messages: [...x.messages, { id: newId('msg'), channel, author, text, at: new Date().toISOString(), clientVisible }],
-        }));
+      postMessage(channel: string, text: string, clientVisible: boolean) {
+        setS((x) => {
+          const author = x.viewAs;
+          const now = new Date().toISOString();
+          const msg: Message = { id: newId('msg'), channel, author, text, at: now, clientVisible };
+          const m = x.matters.find((mm) => mm.id === channel);
+          if (!clientVisible || !m) return { ...x, messages: [...x.messages, msg] };
+          // A reply to the client answers everything they sent: it's handled for everyone alerted, the reply task is done,
+          // and the ball goes back to the client.
+          return {
+            ...x,
+            messages: [...x.messages.map((mm) => (mm.channel === channel && mm.author === 'client' ? { ...mm, readBy: [...new Set([...(mm.readBy ?? []), ...(mm.to ?? []), author])] } : mm)), msg],
+            tasks: x.tasks.map((t) => (t.matterId === channel && t.source === 'portal' && !t.done ? { ...t, done: true, status: 'done', doneAt: now, log: [...t.log, `Done: ${seed.teamName(author)} replied in the portal`] } : t)),
+            matters: x.matters.map((mm) => (mm.id === channel && seed.TEAM.some((tm) => tm.id === mm.ball) ? { ...mm, ball: 'client' } : mm)),
+          };
+        });
+      },
+      /** A client writes in the portal. Alerts the right people, creates a reply task and puts the ball in the firm's court. */
+      clientMessage(matterId: string, text: string) {
+        setS((x) => {
+          const m = x.matters.find((mm) => mm.id === matterId);
+          if (!m) return x;
+          const now = new Date().toISOString();
+          const to = [...new Set([m.owner, ...x.notify.also])].filter((u) => userCanSee(x, u, m));
+          const msg: Message = { id: newId('msg'), channel: matterId, author: 'client', text, at: now, clientVisible: true, to, readBy: [] };
+          const alerts: Alert[] = to.flatMap((u) => {
+            const ch = x.notify.channels[u] ?? { email: false, text: false };
+            return (['app', 'email', 'text'] as const).filter((v) => v === 'app' || ch[v]).map((via) => ({ id: newId('al'), at: now, to: u, via, matterId, text: alertText(m, via) }));
+          });
+          const open = x.tasks.some((t) => t.matterId === matterId && t.source === 'portal' && !t.done);
+          const backup = to.find((u) => u !== m.owner);
+          const task: Task | undefined = x.notify.replyTask && !open ? {
+            id: newId('task'), title: 'Reply to portal message', matterId, due: addBusinessHours(now, x.notify.replyWithin), assignee: m.owner, escalateTo: backup,
+            kind: 'client', status: 'todo', done: false, snoozes: 0, log: ['Created when the client wrote in the portal'], checklist: [], source: 'portal', createdAt: now,
+          } : undefined;
+          return {
+            ...x,
+            messages: [...x.messages, msg],
+            alerts: [...alerts, ...x.alerts],
+            tasks: task ? [...x.tasks, task] : x.tasks,
+            matters: x.matters.map((mm) => (mm.id === matterId ? { ...mm, ball: mm.owner } : mm)),
+          };
+        });
+      },
+      /** Opening a matter's thread marks the client's messages read for whoever opened it. */
+      markRead(channel: string) {
+        setS((x) => {
+          const unread = x.messages.some((mm) => mm.channel === channel && mm.author === 'client' && mm.to?.includes(x.viewAs) && !mm.readBy?.includes(x.viewAs));
+          if (!unread) return x;
+          return { ...x, messages: x.messages.map((mm) => (mm.channel === channel && mm.author === 'client' && mm.to?.includes(x.viewAs) ? { ...mm, readBy: [...new Set([...(mm.readBy ?? []), x.viewAs])] } : mm)) };
+        });
+      },
+      setNotify(n: NotifySettings) {
+        setS((x) => ({ ...x, notify: n }));
       },
 
       // ----- Scheduling -----

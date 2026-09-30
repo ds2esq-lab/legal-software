@@ -4,6 +4,7 @@ import { teamName } from '../data';
 import { money } from '../billing';
 import * as T from '../trust';
 import { fmtDate, fmtTime, PageHead, relDay } from '../ui';
+import { clientFacingName } from '../notify';
 
 export default function Portal() {
   const { s, matterId, lookup, actions, go, notify, access } = useStore();
@@ -38,7 +39,7 @@ export default function Portal() {
               <div className="label">{m.name}</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600 }}>{stages[stageIdx].name}</div>
               <div className="stages" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}>{stages.map((x, i) => <div key={x.id} className={i <= stageIdx ? 'on' : ''} />)}</div>
-              <div className="small muted">Step {stageIdx + 1} of {stages.length}. Handled by {m.owner === 'me' ? 'your lead attorney' : teamName(m.owner)}.</div>
+              <div className="small muted">Step {stageIdx + 1} of {stages.length}. Handled by {m.owner === 'me' ? s.notify.myName : teamName(m.owner)} at {s.notify.firmName}.</div>
               {m.ball === 'client' && (
                 <div className="banner warn">We need something from you to keep moving. See the latest message below.</div>
               )}
@@ -52,7 +53,7 @@ export default function Portal() {
                 {msgs.length === 0 && <p className="muted small">No messages yet.</p>}
                 {msgs.map((x) => (
                   <div key={x.id} className="stack" style={{ gap: 2, alignItems: x.author === 'client' ? 'flex-end' : 'flex-start' }}>
-                    <div className="small muted">{x.author === 'client' ? 'You' : teamName(x.author) === 'You' ? 'Your attorney' : teamName(x.author)} · {relDay(x.at)} {fmtTime(x.at)}</div>
+                    <div className="small muted">{x.author === 'client' ? 'You' : clientFacingName(x.author, s.notify)} · {relDay(x.at)} {fmtTime(x.at)}</div>
                     <div style={{ background: x.author === 'client' ? 'var(--accent-soft)' : 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '8px 12px', maxWidth: '90%', overflowWrap: 'anywhere' }}>{x.text}</div>
                   </div>
                 ))}
@@ -62,12 +63,12 @@ export default function Portal() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!text.trim()) return;
-                  actions.postMessage(m.id, text.trim(), true, 'client');
+                  actions.clientMessage(m.id, text.trim());
                   setText('');
-                  notify('Sent. Your legal team is notified, and it appears in the matter thread.');
+                  notify(`Sent. ${s.notify.firmName} has been notified.`);
                 }}
               >
-                <input className="input" style={{ flex: '1 1 160px' }} id="portal-msg" aria-label="Message your legal team" placeholder="Message your legal team…" value={text} onChange={(e) => setText(e.target.value)} />
+                <input className="input" style={{ flex: '1 1 160px' }} id="portal-msg" aria-label={`Message ${s.notify.firmName}`} placeholder={`Message ${s.notify.firmName}…`} value={text} onChange={(e) => setText(e.target.value)} />
                 <button className="btn primary" type="submit">Send</button>
               </form>
             </section>

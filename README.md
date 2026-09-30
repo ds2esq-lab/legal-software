@@ -18,6 +18,7 @@ This is a **clickable prototype** with sample data held in memory. There is no b
 | Time & billing | Hourly, fixed-price and hybrid matters; configurable rounding (6-minute default) |
 | Scheduling | Meeting types defined once for many hosts and locations; per-person availability schedules; routing form; bookings create PNC matters or attach to Client matters, and a held meeting completes its milestone |
 | Documents | Each matter's SharePoint folder, created from a per-practice-area template and shown inside the matter; share to the portal, request e-signature, versions; matters grouped under a “Last, First” client folder like today's OneDrive; a OneDrive-to-SharePoint move plan in Settings › Documents |
+| Client portal alerts | A client's portal message alerts the responsible attorney plus chosen staff (in app, and optionally email/text that never include the message or client name), creates a "Reply to portal message" task due within N business hours that escalates like any reminder, and puts Whose Ball with the firm. Replying to the client completes the task and clears the alert for everyone. Replies are signed with the writer's name and the firm name, or the firm only. Settings › Notifications |
 | Tasks | Owner, due date, checklist, nudges that escalate to a backup after three snoozes; court and statute deadlines can't be snoozed; stage tasks created automatically |
 | Calendar | Meetings, consults and court deadlines in one week view |
 | Messages | Firm channels plus a thread per matter; team-only vs client-visible |
