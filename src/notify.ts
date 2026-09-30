@@ -20,7 +20,7 @@ export const DEFAULT_NOTIFY: NotifySettings = {
   firmName: 'Don Shaw Law',
   myName: 'Don Shaw',
   sender: 'person',
-  channels: { me: { email: true, text: true }, marcus: { email: true, text: false }, dana: { email: true, text: false }, priya: { email: true, text: false }, lena: { email: false, text: false } },
+  channels: { me: { email: true, text: true }, marcus: { email: true, text: false }, dana: { email: true, text: false }, priya: { email: true, text: false }, lena: { email: true, text: false } },
 };
 
 export interface Alert {

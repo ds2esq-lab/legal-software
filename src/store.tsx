@@ -86,7 +86,7 @@ interface State {
 }
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
-const CONFIG_KEY = 'docket.config.v11';
+const CONFIG_KEY = 'docket.config.v12';
 function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings' | 'officeHours' | 'notify'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);

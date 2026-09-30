@@ -116,7 +116,8 @@ function allowed(sc: Screen, can: (p: Perm) => boolean) {
     case 'contacts': case 'contact': case 'conflicts': return can('contacts');
     case 'time': return can('billingView');
     case 'trust': return can('payments');
-    case 'portal': case 'phone': return can('matters');
+    case 'portal': return can('matters');
+    case 'phone': return can('matters') || can('intake'); // reception answers the phones
     case 'settings': return can('settings') || can('users');
     default: return true;
   }

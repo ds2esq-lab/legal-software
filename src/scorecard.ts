@@ -100,9 +100,9 @@ function rng(seed: string) {
 const RATES: Record<string, Partial<Record<'tasks' | 'onTime' | 'hours' | 'billable' | 'milestones' | 'consults' | 'hires' | 'invoices' | 'closed' | 'prospects' | 'replyH', number>>> = {
   me: { tasks: 95, onTime: 0.9, hours: 310, billable: 0.78, milestones: 30, consults: 34, hires: 15, closed: 13, prospects: 30, replyH: 7 },
   marcus: { tasks: 120, onTime: 0.86, hours: 305, billable: 0.84, milestones: 44, consults: 20, hires: 9, closed: 11, prospects: 18, replyH: 14 },
-  dana: { tasks: 250, onTime: 0.93, hours: 400, billable: 0.52, milestones: 60, consults: 42, hires: 16, prospects: 75, replyH: 3 },
+  dana: { tasks: 250, onTime: 0.93, hours: 400, billable: 0.52, milestones: 60, closed: 10 },
   priya: { tasks: 170, onTime: 0.82, hours: 360, billable: 0.6, milestones: 36, closed: 9 },
-  lena: { tasks: 70, onTime: 0.96, hours: 420, billable: 0.08, invoices: 58 },
+  lena: { tasks: 130, onTime: 0.95, hours: 420, billable: 0.05, consults: 42, hires: 16, prospects: 80, replyH: 2.2 },
 };
 const ROLE_RATES: Record<string, (typeof RATES)[string]> = {
   managing: RATES.me, attorney: RATES.marcus, paralegal: RATES.priya, intake: { tasks: 120, onTime: 0.9, hours: 420, billable: 0.1, consults: 45, hires: 16, prospects: 80, replyH: 3 }, bookkeeper: RATES.lena,
