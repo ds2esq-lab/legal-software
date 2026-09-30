@@ -5,6 +5,7 @@ import * as trust from './trust';
 import * as sched from './sched';
 import * as docs from './docs';
 import type { DocFile, DocSettings } from './docs';
+import { DEFAULT_OFFICE_HOURS, setFirmCalendar, type OfficeHours } from './officeHours';
 import type { Booking, MeetingType, RoutingForm, Schedule } from './sched';
 import type { BankTxn, Expense, Reconciliation, Replenishment, TrustTxn } from './trust';
 import type { CalEvent, CallLog, Cadences, ConflictCheck, Contact, Matter, Message, Note, Party, Pnc, Role, Task, TimeEntry } from './data';
@@ -65,6 +66,7 @@ interface State {
   routing: RoutingForm;
   bookings: Booking[];
   docSettings: DocSettings;
+  officeHours: OfficeHours;
   docFiles: DocFile[];
   docFolders: Record<string, string[]>; // extra folders added per matter
   timeEntries: TimeEntry[];
@@ -82,7 +84,7 @@ interface State {
 
 // Firm settings survive a reload in this browser. Matter data is sample data and resets.
 const CONFIG_KEY = 'docket.config.v11';
-function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings'>> {
+function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'roles' | 'permRoles' | 'users' | 'numbering' | 'meetingTypes' | 'schedules' | 'routing' | 'docSettings' | 'officeHours'>> {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -93,7 +95,10 @@ function loadConfig(): Partial<Pick<State, 'areas' | 'cadences' | 'billing' | 'r
 
 function initialState(): State {
   const cfg = loadConfig();
+  const officeHours = { ...DEFAULT_OFFICE_HOURS, ...cfg.officeHours };
+  setFirmCalendar(officeHours);
   return {
+    officeHours,
     areas: (cfg.areas ?? DEFAULT_AREAS).map((a) => ({ ...a, stageTasks: a.stageTasks ?? [], feeSchedule: a.feeSchedule ?? [] })),
     cadences: cfg.cadences ?? seed.DEFAULT_CADENCES,
     billing: cfg.billing ?? DEFAULT_BILLING,
@@ -203,11 +208,11 @@ function useStoreValue() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing, docSettings: s.docSettings }));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify({ areas: s.areas, cadences: s.cadences, billing: s.billing, roles: s.roles, permRoles: s.permRoles, users: s.users, numbering: s.numbering, meetingTypes: s.meetingTypes, schedules: s.schedules, routing: s.routing, docSettings: s.docSettings, officeHours: s.officeHours }));
     } catch {
       /* storage unavailable: settings last for this visit only */
     }
-  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing, s.docSettings]);
+  }, [s.areas, s.cadences, s.billing, s.roles, s.permRoles, s.users, s.numbering, s.meetingTypes, s.schedules, s.routing, s.docSettings, s.officeHours]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -535,6 +540,10 @@ function useStoreValue() {
       },
       payFlatFee(id: string) {
         setS((x) => ({ ...x, flatFees: x.flatFees.map((f) => (f.id === id ? { ...f, status: 'paid' } : f)) }));
+      },
+      setOfficeHours(h: OfficeHours) {
+        setFirmCalendar(h);
+        setS((x) => ({ ...x, officeHours: h }));
       },
       setBilling(b: Partial<BillingSettings>) {
         setS((x) => ({ ...x, billing: { ...x.billing, ...b } }));

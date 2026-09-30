@@ -10,6 +10,7 @@ import type { Matter, UserAccess, Task, TimeEntry, Invoice, Pnc } from './data';
 import type { TrustTxn } from './trust';
 import { statsFor, type Quarter } from './metrics';
 import { addDays, todayISO } from './practice';
+import { businessHours } from './officeHours';
 
 export type Unit = 'money' | 'count' | 'hours' | 'pct';
 type Src = 'fees' | 'firmIn' | 'task' | 'hours' | 'milestone' | 'consult' | 'hire' | 'invoice' | 'closed' | 'reply';
@@ -36,7 +37,7 @@ export const METRICS: MetricDef[] = [
   { id: 'consults', label: 'Consults held', unit: 'count', src: 'consult', field: 'n', help: 'Initial consultations with prospects' },
   { id: 'hires', label: 'New clients', unit: 'count', src: 'hire', field: 'n', help: 'PNC matters that hired the firm' },
   { id: 'closed', label: 'Matters closed', unit: 'count', src: 'closed', field: 'n', help: 'Matters completed and closed out, credited to the responsible attorney' },
-  { id: 'response', label: 'Response time', unit: 'hours', src: 'reply', field: 'avg', lowerIsBetter: true, help: 'Average hours from a new prospect’s inquiry to the firm’s first reply (self-booked prospects aren’t counted)' },
+  { id: 'response', label: 'Response time', unit: 'hours', src: 'reply', field: 'avg', lowerIsBetter: true, help: 'Average business hours from a new prospect’s inquiry to the firm’s first reply. Nights, weekends and closed days don’t count; self-booked prospects aren’t included' },
   { id: 'invoicesSent', label: 'Invoices sent', unit: 'count', src: 'invoice', field: 'n', help: 'Invoices issued to clients' },
 ];
 export const metric = (id: string) => METRICS.find((m) => m.id === id);
@@ -260,8 +261,8 @@ export function toneFor(def: MetricDef, value: number | undefined, goal: number 
 /** Rates and averages aren't expected to grow through the quarter, so they aren't judged against pace. */
 export const isRate = (def: MetricDef) => def.field === 'ratio' || def.field === 'avg';
 
-/** Hours from inquiry to first reply. Counted around the clock; business hours could come later. */
-export const responseHours = (from: string, to: string) => Math.max(0, Math.round(((new Date(to).getTime() - new Date(from).getTime()) / 3600000) * 10) / 10);
+/** Business hours from inquiry to first reply: office hours on open days only (see Settings › Office hours). */
+export const responseHours = (from: string, to: string) => Math.round(businessHours(from, to) * 10) / 10;
 
 export function fmt(unit: Unit, v: number | undefined, short = false) {
   if (v === undefined) return '—';

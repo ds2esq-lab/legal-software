@@ -6,9 +6,10 @@ import { newId, renderNumber, type DueRule, type Milestone, type PracticeArea, t
 import { PERMS, TEAM, type Perm, type PermRole, type UserAccess } from '../data';
 import * as T from '../trust';
 import * as SC from '../scorecard';
+import * as OH from '../officeHours';
 import { PageHead } from '../ui';
 
-type Section = 'users' | 'scorecards' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
+type Section = 'users' | 'scorecards' | 'hours' | 'numbering' | 'documents' | 'trust' | 'areas' | 'roles' | 'intake' | 'billing' | 'integrations';
 
 const INTEGRATIONS = [
   { name: 'Phone system (VoIP)', detail: 'RingCentral, Zoom Phone, 8x8, Dialpad. Caller ID matched to clients, click-to-call, calls logged as time and as client contact.', status: 'Planned' },
@@ -483,6 +484,62 @@ function DocsEditor() {
   );
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function OfficeHoursEditor() {
+  const { s, actions, notify } = useStore();
+  const h = s.officeHours;
+  const set = (p: Partial<OH.OfficeHours>) => actions.setOfficeHours({ ...h, ...p });
+  const [date, setDate] = useState('');
+  const [name, setName] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const y = Number(today.slice(0, 4));
+  const upcoming = [...OH.closedDays(h, y), ...OH.closedDays(h, y + 1)].filter((c) => c.date >= today).slice(0, 14);
+  const fmt = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  return (
+    <div className="grid cols-2">
+      <section className="panel">
+        <div className="panel-head"><h2>When the office is open</h2></div>
+        <div className="panel-body stack" style={{ gap: 12 }}>
+          <div className="row" style={{ gap: 10 }}>
+            <div className="field"><label htmlFor="oh-open">Opens</label><input className="input" type="time" id="oh-open" value={h.open} onChange={(e) => e.target.value && set({ open: e.target.value })} /></div>
+            <div className="field"><label htmlFor="oh-close">Closes</label><input className="input" type="time" id="oh-close" value={h.close} onChange={(e) => e.target.value && set({ close: e.target.value })} /></div>
+            <span className="small muted" style={{ alignSelf: 'flex-end', paddingBottom: 8 }}>{OH.dayLength(h)} hours a day</span>
+          </div>
+          <div className="field">
+            <span className="label">Open days</span>
+            <div className="row" style={{ gap: 4 }}>
+              {WEEKDAYS.map((d, i) => (
+                <button key={d} className={`btn sm ${h.days.includes(i) ? 'primary' : 'ghost'}`} aria-pressed={h.days.includes(i)} onClick={() => set({ days: h.days.includes(i) ? h.days.filter((x) => x !== i) : [...h.days, i].sort() })}>{d}</button>
+              ))}
+            </div>
+          </div>
+          <label className="row small" style={{ gap: 6 }}><input type="checkbox" id="oh-federal" checked={h.federal} onChange={(e) => set({ federal: e.target.checked })} /> Closed on federal holidays (the observed date when one falls on a weekend)</label>
+          <label className="row small" style={{ gap: 6 }}><input type="checkbox" id="oh-tg" checked={h.dayAfterThanksgiving} onChange={(e) => set({ dayAfterThanksgiving: e.target.checked })} /> Closed the day after Thanksgiving</label>
+          <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); if (!date) return; set({ extra: [...h.extra.filter((c) => c.date !== date), { date, name: name.trim() || 'Office closed' }] }); notify(`Closed ${fmt(date)} added`); setDate(''); setName(''); }}>
+            <input className="input small" type="date" id="oh-date" aria-label="Closed date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: 'auto' }} />
+            <input className="input small" id="oh-name" aria-label="Reason" placeholder="Reason, e.g. Christmas Eve" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
+            <button className="btn sm" type="submit">Add closed day</button>
+          </form>
+          <p className="small muted" style={{ margin: 0 }}>Used for response time to new prospects, which counts only open hours, and for any deadline rule measured in workdays. Court deadlines follow the court’s own calendar.</p>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>Coming closed days</h2><span className="small muted">Besides {h.days.join() === '1,2,3,4,5' ? 'weekends' : WEEKDAYS.filter((_, i) => !h.days.includes(i)).join(', ') || 'no regular days off'}</span></div>
+        <ul className="list">
+          {upcoming.map((c) => (
+            <li key={c.date + c.name} className="spread">
+              <span><strong className="num small">{fmt(c.date)}</strong> <span className="small">{c.name}</span></span>
+              {h.extra.some((x) => x.date === c.date) && <button className="btn sm ghost icon danger" aria-label={`Remove ${c.name}`} onClick={() => set({ extra: h.extra.filter((x) => x.date !== c.date) })}>×</button>}
+            </li>
+          ))}
+          {upcoming.length === 0 && <li className="muted small">No closed days set.</li>}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 function ScorecardEditor() {
   const { s, actions } = useStore();
   const setUser = (u: UserAccess) => actions.setUsers(s.users.map((x) => (x.userId === u.userId ? u : x)));
@@ -665,7 +722,7 @@ export default function Settings() {
     <>
       <PageHead title="Settings" sub="Your firm’s rules. Change them here and every matter, board and deadline follows. Settings are saved in this browser for the prototype." />
       <div className="tabs" role="tablist">
-        {([['users', 'Users & permissions'], ['scorecards', 'Scorecards & goals'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' || k === 'scorecards' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
+        {([['users', 'Users & permissions'], ['scorecards', 'Scorecards & goals'], ['hours', 'Office hours'], ['numbering', 'Matter numbering'], ['documents', 'Documents'], ['trust', 'Trust accounting'], ['areas', 'Practice areas'], ['roles', 'Contact roles'], ['intake', 'Intake cadences'], ['billing', 'Billing'], ['integrations', 'Integrations']] as [Section, string][]).filter(([k]) => (k === 'users' || k === 'scorecards' ? access.can('users') : k === 'trust' ? access.can('settings') && access.can('payments') : access.can('settings'))).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
@@ -694,6 +751,7 @@ export default function Settings() {
 
       {section === 'users' && access.can('users') && <UsersEditor />}
       {section === 'scorecards' && access.can('users') && <ScorecardEditor />}
+      {section === 'hours' && <OfficeHoursEditor />}
       {section === 'numbering' && <NumberingEditor />}
       {section === 'documents' && <DocsEditor />}
       {section === 'trust' && (

@@ -1,3 +1,4 @@
+import { isOpenDay } from './officeHours';
 // Practice areas are configuration, not code. Everything here is editable in Settings.
 
 export interface Stage {
@@ -273,12 +274,13 @@ export function addDays(iso: string, n: number) {
   return toISO(d);
 }
 
+/** Adds days the office is open: skips weekends, federal holidays and the firm's other closed days. */
 export function addWorkdays(iso: string, n: number) {
   const d = parseDate(iso);
   let left = n;
   while (left > 0) {
     d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0 && d.getDay() !== 6) left--;
+    if (isOpenDay(toISO(d))) left--;
   }
   return toISO(d);
 }

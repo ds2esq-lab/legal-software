@@ -64,7 +64,7 @@ function PncCard({ p }: { p: Pnc }) {
         <Person id={p.owner} />
       </div>
       <div className="small muted">{p.title}</div>
-      {p.receivedAt && !p.firstReplyAt && <span className="pill tone-danger small" style={{ alignSelf: 'flex-start' }}>No reply yet · {Math.round(responseHours(p.receivedAt, new Date().toISOString()))} h</span>}
+      {p.receivedAt && !p.firstReplyAt && <span className="pill tone-danger small" style={{ alignSelf: 'flex-start' }}>No reply yet · {Math.round(responseHours(p.receivedAt, new Date().toISOString()))} business h</span>}
       <div className="row" style={{ gap: 4 }}><ConflictPill p={p} />{p.parties.length > 1 && <span className="small muted">+{p.parties.length - 1} people</span>}</div>
       {p.consultAt && (p.stage === 'scheduled' || p.stage === 'notes') && (
         <div className="small">Consult {relDay(p.consultAt)} {fmtTime(p.consultAt)}</div>

@@ -9,7 +9,7 @@ import { HireForm } from './Intake';
 import { NewTaskForm, TaskRow } from './Tasks';
 import { responseHours } from '../scorecard';
 
-const fmtHours = (h: number) => (h < 48 ? `${h < 10 ? Math.round(h * 10) / 10 : Math.round(h)} h` : `${Math.round(h / 24)} days`);
+const fmtHours = (h: number) => `${h < 10 ? Math.round(h * 10) / 10 : Math.round(h)} h`;
 
 export default function PncDetail() {
   const { s, pncId, lookup, actions, go, notify } = useStore();
@@ -36,10 +36,10 @@ export default function PncDetail() {
         <div className="row small" style={{ gap: 8 }}>
           <span className="label">First reply</span>
           {p.firstReplyAt ? (
-            <span className={`pill ${responseHours(p.receivedAt, p.firstReplyAt) <= 4 ? 'tone-ok' : 'tone-warn'}`}>{fmtHours(responseHours(p.receivedAt, p.firstReplyAt))} after the inquiry came in</span>
+            <span className={`pill ${responseHours(p.receivedAt, p.firstReplyAt) <= 4 ? 'tone-ok' : 'tone-warn'}`}>{responseHours(p.receivedAt, p.firstReplyAt) === 0 ? 'Replied before the office opened: counts as 0 business hours' : `${fmtHours(responseHours(p.receivedAt, p.firstReplyAt))} of business hours after the inquiry came in`}</span>
           ) : (
             <>
-              <span className="pill tone-warn">Waiting {fmtHours(responseHours(p.receivedAt, new Date().toISOString()))}</span>
+              <span className="pill tone-warn">Waiting {fmtHours(responseHours(p.receivedAt, new Date().toISOString()))} of business hours</span>
               <button className="btn sm" onClick={() => up({ firstReplyAt: new Date().toISOString() })}>Mark first reply sent</button>
               <span className="muted">Logging a follow-up touch also counts.</span>
             </>
